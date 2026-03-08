@@ -1,0 +1,11 @@
+폴더 PATH의 목록입니다.
+볼륨 일련 번호는 A6BD-DC85입니다.
+D:.
+    app_structure.txt
+    favicon.ico
+    globals.css
+    layout.tsx
+    page.tsx
+    
+
+에 하위 폴더가 없습니다.
