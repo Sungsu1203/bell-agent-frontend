@@ -39,3 +39,18 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# ── Additional Security & Clean-up (Added) ───────────────
+# 환경 변수 파일 (실수로라도 절대 올라가지 않도록 재확인)
+.env
+.env.local
+.env.production
+
+# 배포 시 불필요한 구조 파악용 텍스트 파일들
+*structure.txt
+folder_tree.txt
+
+# 운영체제 및 에디터 관련 보강
+Thumbs.db
+.vscode/
+.idea/
