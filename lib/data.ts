@@ -1,0 +1,210 @@
+// lib/data.ts
+// UI 타입 정의 + 백엔드 응답을 UI 타입으로 변환하는 헬퍼
+
+import type { StateResponse, FileMeta } from "./api";
+
+export type SectionStatus = "done" | "writing" | "pending";
+
+export interface Section {
+  id: number;
+  title: string;
+  rawTitle: string;
+  status: SectionStatus;
+  body?: string;
+  fileId?: string;
+}
+
+export interface Project {
+  title: string;
+  period: string;
+  filesLearned: number;
+  lastUpdated: string;
+  objectives: string[];
+}
+
+export type WorkflowStep = "prepare" | "mission" | "outline" | "write" | "review";
+
+export interface WorkflowState {
+  currentStep: WorkflowStep;
+  prepareCompleted: boolean;
+  missionCompleted: boolean;
+  outlineCompleted: boolean;
+  writeProgress: { done: number; total: number };
+  reviewCompleted: boolean;
+
+  filesLearned: number;
+  objectivesCount: number;
+  sectionsTotal: number;
+}
+
+// ───── 변환 헬퍼 ─────
+
+export function parseTitle(raw: string): string {
+  let s = raw.replace(/^#+\s*/, "");
+  s = s.replace(/^\d+[.)]\s*/, "");
+  return s.trim();
+}
+
+// 한글/영어 제목을 파일명 슬러그로 변환
+// 예: "Executive Summary" → "executive-summary"
+//     "2025-2026 키성장 건기식 시장 동향 및 주요 브랜드 경쟁 구도 분석"
+//        → "2025-2026-키성장-건기식-시장-동향-및-주요-브랜드-경쟁-구도-분석"
+function slugifyTitle(title: string): string {
+  return title
+    .toLowerCase()
+    .trim()
+    .replace(/[/\\&]/g, "")              // 슬래시, 역슬래시, 앰퍼샌드 제거
+    .replace(/[()[\]{}.,!?:;'"]/g, "")  // 구두점 제거
+    .replace(/\s+/g, "-")                // 공백 → 하이픈
+    .replace(/-+/g, "-")                 // 연속 하이픈 압축
+    .replace(/^-|-$/g, "");              // 양끝 하이픈 제거
+}
+
+// 파일명 → 섹션 ID. 두 가지 방식 시도:
+//   1차: "1-executive-summary.md" 같은 옛날 형식 (파일명 앞에 숫자)
+//   2차: "executive-summary.md" 같은 새 형식 (제목 슬러그 매칭)
+export function extractSectionIdFromFile(
+  file: FileMeta,
+  outlineItems: string[] = []
+): number | null {
+  // 1차 시도: 파일명 앞 숫자 ("1-...", "2_..." 등)
+  const numMatch = file.name.match(/^(\d{1,2})[-_]/);
+  if (numMatch) {
+    return parseInt(numMatch[1], 10);
+  }
+
+  // 2차 시도: 제목 슬러그로 매칭
+  // 파일명에서 .md 확장자 떼고 슬러그 추출
+  const fileSlug = file.name.replace(/\.md$/i, "").toLowerCase();
+
+  for (let i = 0; i < outlineItems.length; i++) {
+    const titleSlug = slugifyTitle(parseTitle(outlineItems[i]));
+    if (titleSlug && fileSlug === titleSlug) {
+      return i + 1;  // outline은 0-based, 섹션은 1-based
+    }
+  }
+
+  return null;
+}
+
+export function buildSections(
+  outlineItems: string[],
+  files: FileMeta[],
+  state: StateResponse | null
+): Section[] {
+  const fileBySection = new Map<number, FileMeta>();
+  // 최신 파일이 우선 매칭되도록 mtime 내림차순 정렬
+  const sortedFiles = [...files].sort((a, b) => (b.mtime ?? 0) - (a.mtime ?? 0));
+  for (const f of sortedFiles) {
+    const id = extractSectionIdFromFile(f, outlineItems);
+    if (id !== null && !fileBySection.has(id)) {
+      fileBySection.set(id, f);
+    }
+  }
+
+  const sections: Section[] = outlineItems.map((raw, idx) => {
+    const id = idx + 1;
+    const file = fileBySection.get(id);
+    const isDone = !!file;
+
+    return {
+      id,
+      title: parseTitle(raw),
+      rawTitle: raw,
+      status: isDone ? "done" : "pending",
+      fileId: file?.id,
+    };
+  });
+
+  if (state && state.phase !== "idle") {
+    const firstPending = sections.findIndex((s) => s.status === "pending");
+    if (firstPending !== -1) {
+      sections[firstPending].status = "writing";
+    }
+  }
+
+  return sections;
+}
+
+export function buildWorkflow(
+  state: StateResponse | null,
+  filesCount: number,
+  outlineSource: "topic" | "default" | "empty" | null,
+  sections: Section[],
+  objectivesCount: number
+): WorkflowState {
+  const sectionsDone = sections.filter((s) => s.status === "done").length;
+  const sectionsTotal = sections.length;
+  const phase = state?.phase ?? "idle";
+
+  const prepareCompleted = filesCount > 0;
+  const missionCompleted = objectivesCount > 0;
+  const outlineCompleted = sectionsTotal > 0;
+  const writeFullyDone = sectionsTotal > 0 && sectionsDone >= sectionsTotal;
+  const reviewCompleted = false;
+
+  let currentStep: WorkflowStep = "prepare";
+  if (prepareCompleted) currentStep = "mission";
+  if (missionCompleted) currentStep = "outline";
+  if (outlineCompleted) currentStep = "write";
+  if (writeFullyDone) currentStep = "review";
+  if (phase === "writing" || phase === "running") currentStep = "write";
+
+  return {
+    currentStep,
+    prepareCompleted,
+    missionCompleted,
+    outlineCompleted,
+    writeProgress: { done: sectionsDone, total: sectionsTotal },
+    reviewCompleted,
+    filesLearned: filesCount,
+    objectivesCount,
+    sectionsTotal,
+  };
+}
+
+export function buildProject(
+  state: StateResponse | null,
+  filesCount: number
+): Project {
+  const topicTitle = state?.flags.topic_title ?? "(프로젝트 미설정)";
+
+  const periodMatch = topicTitle.match(/(\d{4}[~~–-]?\d{0,4})\s*$/);
+  const period = periodMatch ? periodMatch[1].replace(/[~–-]/g, "–") : "";
+  const cleanTitle = periodMatch
+    ? topicTitle.slice(0, periodMatch.index).trim()
+    : topicTitle;
+
+  let lastUpdated = "—";
+  if (state?.updated_at) {
+    lastUpdated = formatRelativeTime(state.updated_at);
+  }
+
+  return {
+    title: cleanTitle,
+    period,
+    filesLearned: filesCount,
+    lastUpdated,
+    objectives: state?.objectives ?? [],
+  };
+}
+
+export function formatRelativeTime(timestamp: string): string {
+  const t = Date.parse(timestamp.replace(" ", "T"));
+  if (isNaN(t)) return timestamp;
+  const diffSec = Math.max(0, (Date.now() - t) / 1000);
+  if (diffSec < 60) return "방금 전";
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}분 전`;
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}시간 전`;
+  return `${Math.floor(diffSec / 86400)}일 전`;
+}
+
+export const SECTION_SUBTITLES: Record<number, string> = {
+  1: "전략 핵심 요약",
+  2: "주요 브랜드의 성분/메시지/타깃 비교 및 시장 동향",
+  3: "학부모 커뮤니티 기반 키성장 고민 키워드와 상담 전환 장애요인",
+  4: "리드 수집 전환을 높이는 D2C 랜딩페이지 구성 및 CRM/TM 연계",
+  5: "실행 로드맵 및 핵심 KPI",
+  6: "고효율 DB 수집 채널 및 운영 모델",
+  7: "향후 협의 계획",
+};
