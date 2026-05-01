@@ -5,6 +5,7 @@ import { WorkflowState, WorkflowStep } from "@/lib/data";
 
 interface WorkflowStepperProps {
   workflow: WorkflowState;
+  onStepClick?: (step: WorkflowStep) => void;  // 클릭 가능한 단계
 }
 
 interface StepDef {
@@ -67,7 +68,7 @@ function getStepState(
   return "pending";
 }
 
-export function WorkflowStepper({ workflow }: WorkflowStepperProps) {
+export function WorkflowStepper({ workflow, onStepClick }: WorkflowStepperProps) {
   return (
     <div
       style={{
@@ -122,14 +123,23 @@ export function WorkflowStepper({ workflow }: WorkflowStepperProps) {
           const rightLineColor =
             state === "done" ? "var(--border-default)" : "var(--border-subtle)";
 
+          // 클릭 가능 여부: done 또는 current 상태만
+          const isClickable = !!onStepClick && (state === "done" || state === "current");
+
           return (
             <div
               key={step.key}
+              onClick={() => {
+                if (isClickable) onStepClick!(step.key);
+              }}
               style={{
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
                 padding: "0 4px",
+                cursor: isClickable ? "pointer" : "default",
+                opacity: isClickable ? 1 : 0.65,
+                transition: "opacity 0.15s ease",
               }}
             >
               <div

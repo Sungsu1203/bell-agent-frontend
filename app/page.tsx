@@ -8,6 +8,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { ReportCanvas } from "@/components/ReportCanvas";
 import { SourcePanel } from "@/components/SourcePanel";
 import { LogPanel } from "@/components/LogPanel";
+import { ReviewPanel } from "@/components/ReviewPanel";
 import {
   Section,
   WorkflowState,
@@ -16,6 +17,7 @@ import {
   buildSections,
   buildWorkflow,
   buildProject,
+  reviewReport,    // ← 추가
 } from "@/lib/data";
 import {
   fetchOutline,
@@ -59,6 +61,12 @@ export default function Page() {
   // ───── 출처 패널 상태 ─────
   const [footnotes, setFootnotes] = useState<FootnoteDef[]>([]);
   const [activeSource, setActiveSource] = useState<string | null>(null);
+
+  // 사용자가 명시적으로 보고 있는 단계 (자동 계산 override)
+  const [stepOverride, setStepOverride] = useState<string | null>(null);
+
+    // 모든 섹션 본문 캐시 (검토 단계용)
+  const [allBodies, setAllBodies] = useState<Record<number, string>>({});
 
   // 활성 섹션 바뀌면 패널 닫기
   useEffect(() => {
@@ -144,6 +152,32 @@ export default function Page() {
     };
   }, [activeSectionId, sections]);
 
+  // 모든 섹션 본문을 한 번에 fetch (검토 단계용)
+  // sections가 바뀔 때마다 실행 — 새 섹션이 작성되면 자동 갱신
+  useEffect(() => {
+    let cancelled = false;
+    const fetchAll = async () => {
+      const results: Record<number, string> = {};
+      await Promise.all(
+        sections
+          .filter((s) => s.fileId)
+          .map(async (s) => {
+            try {
+              const text = await fetchFileContent(s.fileId!);
+              if (!cancelled) results[s.id] = text;
+            } catch {
+              // 개별 섹션 실패는 조용히 무시 (다른 섹션 검토는 계속)
+            }
+          })
+      );
+      if (!cancelled) setAllBodies(results);
+    };
+    fetchAll();
+    return () => {
+      cancelled = true;
+    };
+  }, [sections]);
+
   const handleWriteSection = async (id: number) => {
     setActiveSectionId(id);
     const target = sections.find((s) => s.id === id);
@@ -188,6 +222,29 @@ export default function Page() {
   const sectionWithBody: Section | undefined = activeSection
     ? { ...activeSection, body: activeBody }
     : undefined;
+
+  // 검토 단계용: 모든 섹션 본문 맵 (현재 활성 섹션만 실제 body 있음)
+  // 다른 섹션은 fileId만 있으면 검사할 수 있도록 빈 문자열로 처리
+  // 검토용 bodyMap:
+  //  - 활성 섹션은 최신 activeBody 우선 (실시간 반영)
+  //  - 그 외 섹션은 캐시(allBodies)
+  //  - 캐시도 없으면 undefined → 검토 함수가 "본문 비어있음"으로 처리
+  const bodyMap: Record<number, string | undefined> = {};
+  for (const s of sections) {
+    if (s.id === activeSectionId && activeBody !== undefined) {
+      bodyMap[s.id] = activeBody;
+    } else if (allBodies[s.id]) {
+      bodyMap[s.id] = allBodies[s.id];
+    } else {
+      bodyMap[s.id] = undefined;
+    }
+  }
+  const review = reviewReport(sections, bodyMap);
+  // 검토 단계 표시 여부:
+  // - stepOverride가 있으면 그걸 우선 (사용자가 명시적으로 클릭한 경우)
+  // - 없으면 자동 계산 (모든 섹션 작성 완료 시 자동 진입)
+  const effectiveStep = stepOverride ?? workflow.currentStep;
+  const isReviewStep = effectiveStep === "review";
 
   const headerStatus: "idle" | "writing" | "error" = error
     ? "error"
@@ -259,7 +316,13 @@ export default function Page() {
           </div>
         )}
 
-        <WorkflowStepper workflow={workflow} />
+        <WorkflowStepper
+          workflow={workflow}
+          onStepClick={(step) => {
+            // review 단계는 검토 화면, 그 외는 모두 작성 화면
+            setStepOverride(step === "review" ? "review" : "write");
+          }}
+        />
 
         <div
           style={{
@@ -274,18 +337,35 @@ export default function Page() {
             project={project}
             sections={sections}
             activeSectionId={activeSectionId}
-            onSelectSection={setActiveSectionId}
+            onSelectSection={(id) => {
+              setActiveSectionId(id);
+              setStepOverride("write"); // 섹션 선택 시 Write 모드로
+            }}
             onWriteSection={handleWriteSection}
             onUpdateRag={handleUpdateRag}
           />
-          <ReportCanvas
-            section={sectionWithBody}
-            subtitle={SECTION_SUBTITLES[activeSectionId]}
-            bodyLoading={bodyLoading}
-            onCitationClick={(source) => setActiveSource(source)}
-            onCommandSubmit={handleRunCommand}
-            onFootnotesChange={setFootnotes}
-          />
+          {isReviewStep ? (
+            <div
+              style={{
+                background: "var(--bg-surface)",
+                border: "0.5px solid var(--border-subtle, #ddd)",
+                borderRadius: "var(--radius-md, 6px)",
+                padding: "20px 24px",
+                minHeight: 400,
+              }}
+            >
+              <ReviewPanel review={review} />
+            </div>
+          ) : (
+            <ReportCanvas
+              section={sectionWithBody}
+              subtitle={SECTION_SUBTITLES[activeSectionId]}
+              bodyLoading={bodyLoading}
+              onCitationClick={(source) => setActiveSource(source)}
+              onCommandSubmit={handleRunCommand}
+              onFootnotesChange={setFootnotes}
+            />
+          )}
           {isPanelOpen && (
             <SourcePanel
               source={activeSource!}

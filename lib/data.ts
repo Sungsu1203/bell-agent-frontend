@@ -208,3 +208,142 @@ export const SECTION_SUBTITLES: Record<number, string> = {
   6: "고효율 DB 수집 채널 및 운영 모델",
   7: "향후 협의 계획",
 };
+
+// ─────────────────────────────────────────────
+// 보고서 검토(Review) — 코드만으로 가능한 자동 점검
+// ─────────────────────────────────────────────
+
+export interface SectionReview {
+  id: number;
+  title: string;
+  hasBody: boolean;
+  charCount: number;
+  citationCount: number;        // 본문에 [...] 패턴 개수
+  recommendationCount: number;  // "Recommendation" / "권장" 항목 개수
+  hasReferences: boolean;       // "참고 문헌" 또는 "각주" 섹션 있나
+  warnings: string[];           // 사람이 읽을 경고 메시지들
+}
+
+export interface ReportReview {
+  // 요약 통계
+  totalSections: number;
+  completedSections: number;
+  totalCharCount: number;
+  totalCitations: number;
+  // 항목별 합격/불합격
+  completenessOk: boolean;
+  citationsOk: boolean;
+  structureOk: boolean;
+  // 섹션별 상세
+  sections: SectionReview[];
+  // 전체 경고
+  globalWarnings: string[];
+}
+
+// 본문 한 개를 분석
+function reviewSection(
+  id: number,
+  title: string,
+  body: string | undefined
+): SectionReview {
+  const text = body ?? "";
+  const hasBody = text.trim().length > 0;
+  const charCount = text.length;
+
+  // 인용 개수: [foo.pptx] 또는 [news.com] 같은 대괄호 인용 카운트
+  // 단, [^1] 같은 footnote 마커는 제외
+  const citationMatches = text.match(/\[(?!\^)[^\]\n]+\]/g) ?? [];
+  const citationCount = citationMatches.length;
+
+  // Recommendation 개수: "Actionable Recommendations" 섹션 안의 번호 리스트
+  let recommendationCount = 0;
+  const recSection = text.match(
+    /(?:###?\s*(?:Actionable\s*Recommendations|권장\s*사항|실행\s*권장)[\s\S]*?)(?=\n##|\n---|\Z|$)/i
+  );
+  if (recSection) {
+    const items = recSection[0].match(/^\s*\d+\./gm) ?? [];
+    recommendationCount = items.length;
+  }
+
+  // 참고 문헌 섹션 있나
+  const hasReferences = /(?:###?\s*(?:참고\s*문헌|각주|References))/i.test(text);
+
+  // 경고 메시지 (사람이 읽을 수 있게)
+  const warnings: string[] = [];
+  if (!hasBody) {
+    warnings.push("본문이 비어있습니다");
+  } else {
+    if (charCount < 500) warnings.push(`본문이 짧습니다 (${charCount}자)`);
+    if (citationCount === 0) warnings.push("출처 인용이 없습니다");
+    if (recommendationCount === 0)
+      warnings.push("Actionable Recommendations가 없습니다");
+    if (!hasReferences) warnings.push("참고 문헌 섹션이 없습니다");
+  }
+
+  return {
+    id,
+    title,
+    hasBody,
+    charCount,
+    citationCount,
+    recommendationCount,
+    hasReferences,
+    warnings,
+  };
+}
+
+// 섹션 배열 + 본문 맵을 받아 전체 보고서 리뷰
+export function reviewReport(
+  sections: Section[],
+  bodyMap: Record<number, string | undefined>
+): ReportReview {
+  const sectionReviews = sections.map((s) =>
+    reviewSection(s.id, s.title, bodyMap[s.id])
+  );
+
+  const totalSections = sectionReviews.length;
+  const completedSections = sectionReviews.filter((r) => r.hasBody).length;
+  const totalCharCount = sectionReviews.reduce(
+    (sum, r) => sum + r.charCount,
+    0
+  );
+  const totalCitations = sectionReviews.reduce(
+    (sum, r) => sum + r.citationCount,
+    0
+  );
+
+  // 항목별 합격 기준
+  const completenessOk =
+    totalSections > 0 && completedSections === totalSections;
+  // 인용: 모든 작성된 섹션에 최소 1개씩
+  const citationsOk =
+    sectionReviews.filter((r) => r.hasBody).every((r) => r.citationCount > 0);
+  // 구조: 모든 작성된 섹션에 Recommendations 있고 참고 문헌 있음
+  const structureOk = sectionReviews
+    .filter((r) => r.hasBody)
+    .every((r) => r.recommendationCount > 0 && r.hasReferences);
+
+  // 전체 경고
+  const globalWarnings: string[] = [];
+  if (totalSections === 0) {
+    globalWarnings.push("목차가 비어있습니다");
+  } else if (completedSections === 0) {
+    globalWarnings.push("아직 작성된 섹션이 없습니다");
+  } else if (completedSections < totalSections) {
+    globalWarnings.push(
+      `${totalSections - completedSections}개 섹션이 아직 작성되지 않았습니다`
+    );
+  }
+
+  return {
+    totalSections,
+    completedSections,
+    totalCharCount,
+    totalCitations,
+    completenessOk,
+    citationsOk,
+    structureOk,
+    sections: sectionReviews,
+    globalWarnings,
+  };
+}

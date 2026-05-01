@@ -17,7 +17,8 @@ export type Block =
   | { type: "heading"; level: number; text: string }
   | { type: "ordered-list"; items: string[] }
   | { type: "unordered-list"; items: string[] }
-  | { type: "hr" };
+  | { type: "hr" }
+  | { type: "table"; headers: string[]; rows: string[][] };
 
 export interface ParsedDocument {
   contentBlocks: Block[];
@@ -97,15 +98,30 @@ export function parseMarkdownBlocks(text: string): Block[] {
     }
   };
 
-  for (const rawLine of lines) {
+  // 표 라인 판별
+  const isTableLine = (l: string) =>
+    l.trim().startsWith("|") && l.trim().endsWith("|");
+  // 표 구분 라인 판별 ( |---|:---:|---:| 같은 형식)
+  const isTableDivider = (l: string) =>
+    /^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?$/.test(l.trim());
+  // 셀 분해
+  const cellsOf = (l: string): string[] => {
+    const inner = l.trim().replace(/^\|/, "").replace(/\|$/, "");
+    return inner.split("|").map((s) => s.trim());
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i];
     const line = rawLine.replace(/\s+$/, "");
 
+    // ─── 빈 줄 ───
     if (!line.trim()) {
       flushBuffer();
       flushList();
       continue;
     }
 
+    // ─── 구분선 ───
     if (line.trim() === "---" || line.trim() === "***") {
       flushBuffer();
       flushList();
@@ -113,6 +129,31 @@ export function parseMarkdownBlocks(text: string): Block[] {
       continue;
     }
 
+    // ─── 표 (GFM table) ───
+    if (isTableLine(line)) {
+      flushBuffer();
+      flushList();
+      // 연속된 표 라인 모두 모음
+      const tableLines: string[] = [line];
+      let j = i + 1;
+      while (j < lines.length && isTableLine(lines[j])) {
+        tableLines.push(lines[j].replace(/\s+$/, ""));
+        j++;
+      }
+      // 파싱
+      const headers = cellsOf(tableLines[0]);
+      let dataStart = 1;
+      if (tableLines.length > 1 && isTableDivider(tableLines[1])) {
+        dataStart = 2;
+      }
+      const rows = tableLines.slice(dataStart).map(cellsOf);
+      blocks.push({ type: "table", headers, rows });
+      // 처리한 줄들 건너뛰기
+      i = j - 1;
+      continue;
+    }
+
+    // ─── 헤딩 ───
     const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
     if (headingMatch) {
       flushBuffer();
@@ -125,24 +166,55 @@ export function parseMarkdownBlocks(text: string): Block[] {
       continue;
     }
 
+    // ─── 순서 있는 리스트 (ordered) ───
     const olMatch = line.match(/^\s*(\d+)[.)]\s+(.+)$/);
     if (olMatch) {
       flushBuffer();
-      if (listType === "unordered") flushList();
-      listType = "ordered";
-      listBuffer.push(olMatch[2]);
+      // 핵심 변경: unordered 리스트가 진행 중이어도 flush 하지 않고,
+      // 들여쓰기를 보고 판단
+      const indent = (line.match(/^(\s*)/)?.[1] ?? "").length;
+      if (indent === 0) {
+        // 최상위 ordered 리스트: 기존 unordered가 있으면 닫고 새로 시작
+        if (listType === "unordered") flushList();
+        listType = "ordered";
+        listBuffer.push(olMatch[2]);
+      } else {
+        // 들여쓰기된 ordered: 부모 리스트의 하위 항목으로 취급
+        // 단순 처리: 현재 리스트의 마지막 항목에 이어 붙이기
+        if (listBuffer.length > 0) {
+          listBuffer[listBuffer.length - 1] += "\n  " + olMatch[2];
+        } else {
+          listType = "ordered";
+          listBuffer.push(olMatch[2]);
+        }
+      }
       continue;
     }
 
+    // ─── 순서 없는 리스트 (unordered) ───
     const ulMatch = line.match(/^\s*[-*]\s+(.+)$/);
     if (ulMatch) {
       flushBuffer();
-      if (listType === "ordered") flushList();
-      listType = "unordered";
-      listBuffer.push(ulMatch[1]);
+      const indent = (line.match(/^(\s*)/)?.[1] ?? "").length;
+      if (indent === 0) {
+        // 최상위 unordered: 기존 ordered가 있으면 닫고 새로 시작
+        if (listType === "ordered") flushList();
+        listType = "unordered";
+        listBuffer.push(ulMatch[1]);
+      } else {
+        // 들여쓰기된 unordered: 부모(ordered)의 하위 항목
+        // 마지막 항목에 이어 붙이기
+        if (listBuffer.length > 0) {
+          listBuffer[listBuffer.length - 1] += "\n  • " + ulMatch[1];
+        } else {
+          listType = "unordered";
+          listBuffer.push(ulMatch[1]);
+        }
+      }
       continue;
     }
 
+    // ─── 일반 단락 ───
     flushList();
     buffer.push(line.trim());
   }

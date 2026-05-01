@@ -453,14 +453,44 @@ function renderBlock(
           listStyle: "decimal",
         }}
       >
-        {block.items.map((item, j) => (
-          <li
-            key={j}
-            style={{ marginBottom: 10, paddingLeft: 4, lineHeight: 1.7 }}
-          >
-            {renderInline(item, onCitationClick)}
-          </li>
-        ))}
+        {block.items.map((item, j) => {
+          const lines = item.split("\n");
+          return (
+            <li
+              key={j}
+              style={{ marginBottom: 10, paddingLeft: 4, lineHeight: 1.7 }}
+            >
+              {lines.map((ln, li) => {
+                // 하위 항목 표시: "  • 텍스트" 또는 "  텍스트"
+                const subMatch = ln.match(/^\s*•\s*(.+)$/);
+                if (subMatch) {
+                  return (
+                    <div
+                      key={li}
+                      style={{
+                        marginLeft: 8,
+                        marginTop: 4,
+                        fontSize: "0.95em",
+                        color: "var(--text-secondary)",
+                        display: "flex",
+                        gap: 6,
+                      }}
+                    >
+                      <span style={{ flexShrink: 0 }}>•</span>
+                      <span>{renderInline(subMatch[1], onCitationClick)}</span>
+                    </div>
+                  );
+                }
+                // 첫 줄 (또는 일반 줄)
+                return (
+                  <div key={li}>
+                    {renderInline(ln, onCitationClick)}
+                  </div>
+                );
+              })}
+            </li>
+          );
+        })}
       </ol>
     );
   }
@@ -475,15 +505,110 @@ function renderBlock(
           listStyle: "disc",
         }}
       >
-        {block.items.map((item, j) => (
-          <li
-            key={j}
-            style={{ marginBottom: 8, paddingLeft: 4, lineHeight: 1.7 }}
-          >
-            {renderInline(item, onCitationClick)}
-          </li>
-        ))}
+        {block.items.map((item, j) => {
+          const lines = item.split("\n");
+          return (
+            <li
+              key={j}
+              style={{ marginBottom: 8, paddingLeft: 4, lineHeight: 1.7 }}
+            >
+              {lines.map((ln, li) => {
+                const subMatch = ln.match(/^\s*•\s*(.+)$/);
+                if (subMatch) {
+                  return (
+                    <div
+                      key={li}
+                      style={{
+                        marginLeft: 8,
+                        marginTop: 4,
+                        fontSize: "0.95em",
+                        color: "var(--text-secondary)",
+                        display: "flex",
+                        gap: 6,
+                      }}
+                    >
+                      <span style={{ flexShrink: 0 }}>◦</span>
+                      <span>{renderInline(subMatch[1], onCitationClick)}</span>
+                    </div>
+                  );
+                }
+                return (
+                  <div key={li}>
+                    {renderInline(ln, onCitationClick)}
+                  </div>
+                );
+              })}
+            </li>
+          );
+        })}
       </ul>
+    );
+  }
+
+  if (block.type === "table") {
+    return (
+      <div
+        key={key}
+        style={{
+          margin: "16px 0 20px 0",
+          overflowX: "auto", // 표가 넓으면 가로 스크롤
+        }}
+      >
+        <table
+          style={{
+            width: "100%",
+            borderCollapse: "collapse",
+            fontSize: 13,
+            lineHeight: 1.5,
+          }}
+        >
+          {block.headers.length > 0 && (
+            <thead>
+              <tr style={{ background: "var(--bg-muted, #f5f5f5)" }}>
+                {block.headers.map((h, i) => (
+                  <th
+                    key={i}
+                    style={{
+                      padding: "10px 12px",
+                      textAlign: "left",
+                      fontWeight: 600,
+                      color: "var(--text-primary)",
+                      borderBottom:
+                        "1px solid var(--border-default, #ccc)",
+                    }}
+                  >
+                    {renderInline(h, onCitationClick)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+          )}
+          <tbody>
+            {block.rows.map((row, ri) => (
+              <tr
+                key={ri}
+                style={{
+                  borderBottom:
+                    "0.5px solid var(--border-subtle, #eee)",
+                }}
+              >
+                {row.map((cell, ci) => (
+                  <td
+                    key={ci}
+                    style={{
+                      padding: "8px 12px",
+                      verticalAlign: "top",
+                      color: "var(--text-primary)",
+                    }}
+                  >
+                    {renderInline(cell, onCitationClick)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     );
   }
 
