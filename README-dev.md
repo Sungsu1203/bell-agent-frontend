@@ -490,6 +490,54 @@ UI 검증은 수동 — 작업 후 `npm run dev` → 브라우저에서 골든 �
   - 후속 의무: 백엔드 `topics/<slug>` 디렉터리에 토픽별 outline + 부제가 들어있다면, 백엔드 `/api/outline` 응답에 부제 필드 추가 → 프론트엔드 `OutlineResponse` 확장으로 토픽-aware 복원 가능 (옵션 B 경로). 우선순위 낮음.
   - **앞으로의 가드**: 새로 코드 추가 시 토픽 슬러그/제목 텍스트를 frontend 코드에 박제하지 말 것. 토픽 의존 데이터는 모두 백엔드 `/api/state` 또는 `/api/outline` 을 통해 받아야 함.
 
+### 12-10. 폴링 useEffect dep 함정 — `sections` ref 직접 사용 → 화면 깜빡임 — 상태: `closed (2026-05-05)` / 의존: 없음 / 우선순위: 높음
+
+- **발견 (2026-05-05)**: 사용자 보고 "보고서 본문이 자주 깜빡이고 위에서부터 화면이 다시 뿌려지며 나타나". 폴링 주기마다 활성 섹션 본문 영역이 1초 미만 비었다가 다시 채워지는 현상.
+- **증상**: 폴링이 도는 2~3초 간격으로 보고서 본문이 사라졌다가 같은 내용으로 다시 표시. 스크롤 위치도 위로 튕김. 작성 중이 아닌 idle 상태에서도 반복.
+- **진단**:
+  - `app/page.tsx` 의 두 useEffect dep가 `sections` 객체를 직접 받음:
+    - 활성 섹션 본문 fetch effect: `[activeSectionId, sections]`
+    - 모든 섹션 본문 fetch effect (검토 단계용): `[sections]`
+  - `refreshAll()` 이 폴링마다 `setSections(buildSections(...))` 로 **새 배열 ref**를 만들어 갈아치움 — 항목 내용은 같아도 ref가 다름.
+  - React useEffect는 dep를 `Object.is` 로 비교 → 매 폴링마다 두 effect가 재실행. 본문 fetch effect는 `setBodyLoading(true)` + 잠깐 fetch 동안 비어 보이는 상태 → 새 fetch 완료 → 다시 채움. 사용자 눈에 깜빡임.
+- **해결** (`app/page.tsx` 패치):
+  - 활성 섹션 본문 effect: dep를 `[activeSectionId, sections]` → `[activeSectionId, activeFileId, activeStatus]` 로 좁힘. `sections` 배열 ref 변동에 흔들리지 않고, 사용자가 섹션을 바꾸거나 작성 상태(`status`)가 변할 때만 재fetch. (status 포함 이유: writing → done 전환 시 새 본문 한 번 더 가져와야 함)
+  - fetch 시작 시 `setActiveBody(undefined)` 호출 제거 — 같은 섹션의 갱신에서는 기존 본문을 유지해 "빈 화면 → 본문" 깜빡임 차단. 활성 섹션 자체가 바뀌면 effect 재실행 시 자연스럽게 새 본문으로 교체.
+  - 검토용 모든 섹션 본문 fetch effect: dep를 `sections` → `fileIdSig` (= `sections.map(s => "${s.id}:${s.fileId ?? ''}").join("|")`) 로 좁힘. eslint `react-hooks/exhaustive-deps` 는 의도된 동작이므로 비활성 주석.
+  - 폴링 간격 보강: `POLL_INTERVAL_RUNNING` 2s → 3s, `POLL_INTERVAL_IDLE` 8s → 15s. 작업 중일 때만 빠른 갱신.
+- **검증**:
+  - 사용자측 새로고침 후 깜빡임 사라짐 확인.
+  - HMR 시점에 `useEffect` dep 길이 변경(2 → 3) 으로 인한 콘솔 에러는 풀 리로드(Ctrl+Shift+R)로 해소 — 코드 버그 아님.
+- **박제 후기**:
+  - **앞으로의 가드**: 폴링/타이머로 새 객체나 배열을 setState 하면, 그 state 를 dep 로 받는 모든 effect가 매 주기마다 재실행됨. dep 에는 가능한 한 **원시값**(string/number/boolean) 또는 **시그니처 문자열**을 사용. 객체 ref를 dep 로 쓸 때는 `useMemo` + 안정된 비교 키 또는 `useRef` 로 직접 비교 필요.
+  - 본 회귀는 §7-4 (폴링 주기) 에 명시된 idle/running 분기가 dep 안정화 없이 적용된 결과 — §7-4 본문에 fetch effect dep 좁히기 의무를 추가하는 것이 다음 후속 정리 후보.
+
+### 12-11. viewport 고정 레이아웃 + 인쇄 CSS 풀기 짝 규칙 — 상태: `closed (2026-05-05)` / 의존: 없음 / 우선순위: 높음
+
+- **발견 (2026-05-05)**: 사용자 보고 "보고서 본문이 긴 경우 아래로 스크롤해가야 해. 한 화면에서 보면서 스크롤로 위 아래로 오르락 내리락 하게 할 수 있어?" — 페이지 전체가 길어지며 헤더/사이드바가 함께 사라지는 구조. 이후 viewport 고정 레이아웃 도입 → PDF 인쇄가 1페이지에서 잘리는 회귀 발생.
+- **증상**:
+  - (a) 본문이 길면 페이지 전체 스크롤 → 헤더/사이드바/명령창이 화면에서 사라짐.
+  - (b) viewport 고정 도입 후, `window.print()` 시 보고서 1페이지만 인쇄되고 나머지는 누락.
+- **진단**:
+  - 최상위 컨테이너가 `minHeight:100vh` 였고 그 안의 `ReportCanvas` 는 자체 `height:100%` + 본문 `overflowY:auto` 구조 — 부모가 viewport 높이로 **고정**되어야 자식의 100% 가 의미를 가지지만, `minHeight` 만으로는 콘텐츠 따라 늘어남 → 자식 `height:100%` 가 무력화 → 페이지 자체 스크롤로 빠짐.
+  - 인쇄 회귀: viewport 고정 chain (`height:100vh` + `overflow:hidden` + `flex:1` + `minHeight:0`) 이 `@media print` 에서 그대로 살아있음. 기존 인쇄 CSS는 `.report-canvas` 와 `.report-canvas__body` 만 `height:auto / overflow:visible` 로 풀어줬을 뿐, 그 위 두 컨테이너(`body > div`, `body > div > div`) 는 그대로 viewport 에 묶여있어 1페이지에서 잘림.
+- **해결** (코드 변경 두 곳):
+  - `app/page.tsx`: 컨테이너 chain을 viewport 고정으로 변경.
+    - 최상위: `minHeight:100vh` → `height:100vh`, `display:flex/column`, `overflow:hidden`, `boxSizing:border-box`, `padding-bottom:44px` (LogPanel 접힘 높이 확보).
+    - inner column: `flex:1`, `minHeight:0`, `width:100%` 추가.
+    - main grid: `flex:1`, `minHeight:0` 추가.
+    - Sidebar / SourcePanel: 자체 `overflow` 처리가 없어서 wrapper `<div style={{overflow:auto, minHeight:0}}>` 로 감쌈.
+    - ReviewPanel 컨테이너: `minHeight:400` 제거, `overflow:auto`, `minHeight:0` 추가.
+    - `ReportCanvas` 는 이미 `display:flex/column`, `height:100%` + 본문 `flex:1, overflowY:auto` 구조 — 부모 chain만 viewport 고정되면 정상 작동.
+  - `app/globals.css` `@media print`: `body > div { padding:0; background:transparent }` → `body > div, body > div > div { padding:0, background:transparent, height:auto !important, min-height:0 !important, max-height:none !important, overflow:visible !important, display:block !important }` 로 확장. 이로써 viewport 고정 컨테이너가 인쇄 시 자연 흐름으로 풀려 페이지 분할 정상 작동.
+- **검증**:
+  - 사용자측: 깜빡임 회귀 fix(§12-10) 와 함께 viewport 고정 적용 후 헤더/사이드바 고정 확인. PDF 인쇄 시 모든 페이지 출력 확인. Word 다운로드는 별개 회귀(백엔드 §12-13-10) 였고 함께 fix.
+- **박제 후기**:
+  - **짝 규칙 invariant**: 메인 화면 레이아웃에서 `overflow:hidden` 또는 `height:100vh` 를 사용하는 컨테이너를 추가/변경하면, **반드시 같은 PR에서 `@media print` 에 풀기 규칙을 동시 갱신**해야 함. `.report-canvas` 만 풀어주는 것으로는 부족 — 그 위 모든 viewport 고정 노드가 풀려야 콘텐츠가 자연 페이지 분할 됨.
+  - **`minHeight:0` 의무**: flex 자식이 부모 안에서 `overflow:auto` 로 작동하려면 자식 자체에 `minHeight:0` 가 필요(flex item 기본 `min-height:auto` 가 콘텐츠 크기로 늘어나는 것을 막음). 본 변경의 `flex:1, minHeight:0` 한 쌍은 항상 같이 다녀야 함.
+  - **LogPanel 가림 방지**: LogPanel 은 `position:fixed; bottom:0` 이라 viewport 고정 컨테이너 밖에서 동작하지만, 보고서 본문 하단이 LogPanel 에 가려질 수 있음 → 최상위 `padding-bottom:44px` (접힌 LogPanel 높이) 로 시각적 여백 확보. LogPanel 펼친 상태(240px+) 는 일시적이고 본문 자체 스크롤로 접근 가능하므로 동적 padding 까지는 불필요.
+  - 본 변경은 §12-4 (인쇄 CSS 견고성) 와 직결 — pending 항목이지만 본 박제로 짝 규칙 1건은 명문화됨.
+
 ---
 
 ## 13) 알려진 이슈/주의사항
