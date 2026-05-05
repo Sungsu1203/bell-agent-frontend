@@ -67,6 +67,9 @@ export interface RunPayload {
 
 export interface RunResponse {
   ok: boolean;
+  message?: string;
+  error?: string;
+  last_saved_path?: string | null;
   [key: string]: unknown;
 }
 

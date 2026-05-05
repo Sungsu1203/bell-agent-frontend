@@ -7,6 +7,7 @@ import { WorkflowStepper } from "@/components/WorkflowStepper";
 import { Sidebar } from "@/components/Sidebar";
 import { ReportCanvas } from "@/components/ReportCanvas";
 import { SourcePanel } from "@/components/SourcePanel";
+import { ChatResponsePanel, ChatStatus } from "@/components/ChatResponsePanel";
 import { LogPanel } from "@/components/LogPanel";
 import { ReviewPanel } from "@/components/ReviewPanel";
 import {
@@ -63,6 +64,15 @@ export default function Page() {
 
   // 사용자가 명시적으로 보고 있는 단계 (자동 계산 override)
   const [stepOverride, setStepOverride] = useState<string | null>(null);
+
+  // ───── 명령 응답 패널 상태 ─────
+  // 명령 실행 시 우측 슬롯에 응답을 띄움. null 이면 닫힘.
+  const [activeChat, setActiveChat] = useState<{
+    query: string;
+    status: ChatStatus;
+    message?: string;
+    error?: string;
+  } | null>(null);
 
     // 모든 섹션 본문 캐시 (검토 단계용)
   const [allBodies, setAllBodies] = useState<Record<number, string>>({});
@@ -215,13 +225,22 @@ export default function Page() {
   };
 
   const handleRunCommand = async (input: string) => {
-    if (!input.trim()) return;
+    const query = input.trim();
+    if (!query) return;
+    // 명령 응답 패널을 우측에 띄우기 위해 출처 패널은 닫고 로딩으로 시작
+    setActiveSource(null);
+    setActiveChat({ query, status: "loading" });
     try {
-      await runCommand({ input, options: {} });
+      const res = await runCommand({ input: query, options: {} });
+      setActiveChat({
+        query,
+        status: "ok",
+        message: res?.message ?? "(빈 응답)",
+      });
       refreshAll();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      setError(`명령 실행 실패: ${msg}`);
+      setActiveChat({ query, status: "error", error: msg });
     }
   };
 
@@ -263,9 +282,12 @@ export default function Page() {
     ? findMatchingFootnote(activeSource, footnotes)
     : null;
 
-  const isPanelOpen = activeSource !== null;
+  // 우측 슬롯은 한 번에 하나만: chat 가 출처보다 우선 (명령 실행이 더 최근 상호작용)
+  const isChatOpen = activeChat !== null;
+  const isSourceOpen = activeSource !== null && !isChatOpen;
+  const isPanelOpen = isChatOpen || isSourceOpen;
 
-  // 푸시 레이아웃: 패널 열렸을 때 보고서 + 출처 패널이 나란히
+  // 푸시 레이아웃: 패널 열렸을 때 보고서 + 우측 패널이 나란히
   const mainGridCols = isPanelOpen
     ? "240px minmax(0, 1fr) 360px"
     : "240px minmax(0, 1fr)";
@@ -378,18 +400,32 @@ export default function Page() {
             <ReportCanvas
               section={sectionWithBody}
               bodyLoading={bodyLoading}
-              onCitationClick={(source) => setActiveSource(source)}
+              onCitationClick={(source) => {
+                // 인용 칩 클릭 시 chat 패널은 닫고 출처 패널 표시
+                setActiveChat(null);
+                setActiveSource(source);
+              }}
               onCommandSubmit={handleRunCommand}
               onFootnotesChange={setFootnotes}
             />
           )}
           {isPanelOpen && (
             <div style={{ overflow: "auto", minHeight: 0 }}>
-              <SourcePanel
-                source={activeSource!}
-                footnote={matchedFootnote}
-                onClose={() => setActiveSource(null)}
-              />
+              {isChatOpen ? (
+                <ChatResponsePanel
+                  query={activeChat!.query}
+                  status={activeChat!.status}
+                  message={activeChat!.message}
+                  error={activeChat!.error}
+                  onClose={() => setActiveChat(null)}
+                />
+              ) : (
+                <SourcePanel
+                  source={activeSource!}
+                  footnote={matchedFootnote}
+                  onClose={() => setActiveSource(null)}
+                />
+              )}
             </div>
           )}
         </div>
