@@ -562,6 +562,19 @@ UI 검증은 수동 — 작업 후 `npm run dev` → 브라우저에서 골든 �
   - **slot 분리 invariant**: 진행 로그 패널 = 개발자용 원시 stream / 진행 단계 헤더 = 사용자용 요약. 두 채널을 한 패널 안에서 펼침/접힘으로 분리한 설계가 핵심 — §12-앞쪽 `ChatResponsePanel` 을 LogPanel 에 섞었던 1차 시도(직전 세션) 가 가독성 문제로 분리한 결정과 동일 라인.
   - **앞으로의 가드**: 새 LangGraph 노드 추가 시 backend `agent/<node>.py` 의 emit_event 한 줄 의무. 라벨 누락 시 헤더가 이전 단계에 정체됨. 백엔드 `writer_project/README-dev.md` §12-14 와 짝.
 
+### 12-13. 서버 재시작 직후 write 명령에서 vector_search 스킵 + web_search 우회 회귀 — 상태: `closed (2026-05-05, 백엔드측 패치)` / 의존: 백엔드 `agent/supervisor.py` + `core/routers.py` / 우선순위: 높음
+
+- **발견 (2026-05-05)**: 사용자 보고 "백엔드 서버 재시작하고 프런트엔드에서 write:섹션 하면 RAG 가 없다고 가정하고 web_search 부터 하고 vector_search 안 하고 section_writer 로 감. 실제론 RAG 있어서 web_search 할 필요 없고 vector_search 후 section_writer 가 정답인데." LogPanel 헤더에 "웹 검색 → 섹션 본문 작성" 흐름이 떴으나 의도는 "참고문헌 검색 → 섹션 본문 작성".
+- **frontend 측 코드 변경 없음**: §12-12 의 사용자 관점 진행 라벨 채널이 정확히 동작하여 라우팅 사고를 사용자가 곧바로 시각적으로 잡아낸 케이스. 헤더 라벨이 제대로 매칭되지 않음을 사용자가 보고 → 백엔드 라우터 두 군데 가드 누락 발견. 진행 이벤트 채널의 운영 가치 확인 사례.
+- **루트 원인 (백엔드)**: `agent/supervisor.py:supervisor_router` 와 `core/routers.py:after_web_search_agent` 두 라우터가 모두 in-memory `state["references"]["docs"]` (서버 재시작 시 휘발) 만 보고 디스크 영속의 `state["rag_on_disk"]` (Chroma 메타) 를 무시. 서버 재시작 직후엔 references 가 빈 dict 라서 "RAG 없음" 으로 오판하고 web_search 강제 + 후속 vector_search 펜딩 무시.
+- **백엔드 패치 결과 (검증)**: 동일 명령 시간 69초 → 28초, 인용 0개 → 5개, top sources 가 unverified 뉴스 3건 → vendor 자료 (종근당_팩트북.pdf, 벤포벨 광고효과조사 PPT) + 검증된 web doc 으로 회복. 자세한 패치 위치/결과 표는 백엔드 `writer_project/README-dev.md` §12-15.
+- **frontend 영향/규약**:
+  - **진행 라벨 채널은 라우팅 사고 탐지 도구로 활용 가능**: 사용자가 헤더 라벨 시퀀스를 자연 모니터링하다가 "이상한 단계가 떴다" 고 보고하면 백엔드 라우터 가드 점검의 트리거. §12-12 박제 직후 첫 운영 사례.
+  - **frontend 는 라벨 시퀀스 정합성을 가정하지 않는다**: write 명령에 대해 "vector_search 다음에 section_writer 가 와야 한다" 같은 시퀀스 검증을 frontend 에 박지 않음. 라우팅은 백엔드 책임. frontend 는 받은 이벤트를 그대로 표시.
+- **앞으로의 가드 (양쪽 공통)**:
+  - 새로 라우터/가드를 추가할 때 in-memory state (`references`, 세션 단위) 와 disk state (`rag_on_disk`, `rag_stats`, 영속) 를 둘 다 봐야 한다는 규칙. references 만 보고 RAG 자체가 없다고 가정하면 서버 재시작 직후 / 새 세션 첫 명령에서 빗나감.
+  - supervisor 본함수의 `[fast-path] ... → A → B` 로그와 직후 `============ A 또는 B ============` banner 가 일치하는지 운영 점검 항목. 어긋나면 supervisor_router 의 가드가 본함수 의도를 무력화하는 케이스 의심.
+
 ---
 
 ## 13) 알려진 이슈/주의사항
