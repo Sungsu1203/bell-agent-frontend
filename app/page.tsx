@@ -13,7 +13,6 @@ import {
   Section,
   WorkflowState,
   Project,
-  SECTION_SUBTITLES,
   buildSections,
   buildWorkflow,
   buildProject,
@@ -359,7 +358,6 @@ export default function Page() {
           ) : (
             <ReportCanvas
               section={sectionWithBody}
-              subtitle={SECTION_SUBTITLES[activeSectionId]}
               bodyLoading={bodyLoading}
               onCitationClick={(source) => setActiveSource(source)}
               onCommandSubmit={handleRunCommand}

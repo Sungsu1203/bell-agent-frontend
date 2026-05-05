@@ -45,19 +45,20 @@ export function parseTitle(raw: string): string {
   return s.trim();
 }
 
-// 한글/영어 제목을 파일명 슬러그로 변환
-// 예: "Executive Summary" → "executive-summary"
-//     "2025-2026 키성장 건기식 시장 동향 및 주요 브랜드 경쟁 구도 분석"
-//        → "2025-2026-키성장-건기식-시장-동향-및-주요-브랜드-경쟁-구도-분석"
+// 한글/영어 제목을 파일명 슬러그로 변환.
+// 백엔드 utils/text_utils.py 의 slugify(allow_unicode=True) 와 동일한 결과를 내야 한다.
+// 백엔드 규칙: NFKC 정규화 → 소문자 → 공백을 하이픈 → 화이트리스트(_ALLOWED_UNI=[^0-9a-z가-힣\-]) 외 모두 제거.
+// 화이트리스트 방식이라 중점(·)·괄호·구두점·이모지 등이 한 번에 제거되어, 새로운 특수문자가 들어와도 동기화 유지됨.
+// 변경 시 백엔드 utils/text_utils.py:_ALLOWED_UNI 와 동시 갱신 필수 (README-dev.md §7-2 / §12-8 참조).
 function slugifyTitle(title: string): string {
   return title
+    .normalize("NFKC")                  // 백엔드 NFKC 정규화와 일치
     .toLowerCase()
     .trim()
-    .replace(/[/\\&]/g, "")              // 슬래시, 역슬래시, 앰퍼샌드 제거
-    .replace(/[()[\]{}.,!?:;'"]/g, "")  // 구두점 제거
-    .replace(/\s+/g, "-")                // 공백 → 하이픈
-    .replace(/-+/g, "-")                 // 연속 하이픈 압축
-    .replace(/^-|-$/g, "");              // 양끝 하이픈 제거
+    .replace(/\s+/g, "-")               // 공백 → 하이픈 (화이트리스트 적용 전)
+    .replace(/[^0-9a-z가-힣\-]+/g, "")  // 백엔드 _ALLOWED_UNI 화이트리스트와 일치
+    .replace(/-+/g, "-")                // 연속 하이픈 압축
+    .replace(/^-|-$/g, "");             // 양끝 하이픈 제거
 }
 
 // 파일명 → 섹션 ID. 두 가지 방식 시도:
@@ -198,16 +199,6 @@ export function formatRelativeTime(timestamp: string): string {
   if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}시간 전`;
   return `${Math.floor(diffSec / 86400)}일 전`;
 }
-
-export const SECTION_SUBTITLES: Record<number, string> = {
-  1: "전략 핵심 요약",
-  2: "주요 브랜드의 성분/메시지/타깃 비교 및 시장 동향",
-  3: "학부모 커뮤니티 기반 키성장 고민 키워드와 상담 전환 장애요인",
-  4: "리드 수집 전환을 높이는 D2C 랜딩페이지 구성 및 CRM/TM 연계",
-  5: "실행 로드맵 및 핵심 KPI",
-  6: "고효율 DB 수집 채널 및 운영 모델",
-  7: "향후 협의 계획",
-};
 
 // ─────────────────────────────────────────────
 // 보고서 검토(Review) — 코드만으로 가능한 자동 점검
