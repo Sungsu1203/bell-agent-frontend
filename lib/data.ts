@@ -242,22 +242,27 @@ function reviewSection(
   const charCount = text.length;
 
   // 인용 개수: [foo.pptx] 또는 [news.com] 같은 대괄호 인용 카운트
-  // 단, [^1] 같은 footnote 마커는 제외
-  const citationMatches = text.match(/\[(?!\^)[^\]\n]+\]/g) ?? [];
+  // 단, [^1] 같은 footnote 마커, [X]%·[Y]%p 같은 KPI 자리표시자는 제외.
+  // 진짜 인용은 파일명/URL이라 내부에 `.`, `_`, `/` 중 하나는 반드시 포함됨.
+  const citationMatches =
+    text.match(/\[(?!\^)[^\]\n]*[._/][^\]\n]*\]/g) ?? [];
   const citationCount = citationMatches.length;
 
-  // Recommendation 개수: "Actionable Recommendations" 섹션 안의 번호 리스트
+  // Recommendation 개수: "Actionable Recommendations" 섹션 안의 번호 리스트.
+  // 헤딩에 "### 3.4. Actionable Recommendations"처럼 번호가 끼어드는 경우가 있어
+  // 키워드 앞에 선택적 숫자 prefix(예: "3.4.", "7.")를 허용한다.
   let recommendationCount = 0;
   const recSection = text.match(
-    /(?:###?\s*(?:Actionable\s*Recommendations|권장\s*사항|실행\s*권장)[\s\S]*?)(?=\n##|\n---|\Z|$)/i
+    /###?\s*(?:\d+(?:\.\d+)*\.?\s*)?(?:Actionable\s*Recommendations|권장\s*사항|실행\s*권장)[\s\S]*?(?=\n##|\n---|$)/i
   );
   if (recSection) {
     const items = recSection[0].match(/^\s*\d+\./gm) ?? [];
     recommendationCount = items.length;
   }
 
-  // 참고 문헌 섹션 있나
-  const hasReferences = /(?:###?\s*(?:참고\s*문헌|각주|References))/i.test(text);
+  // 참고 문헌 섹션 있나 (헤딩 번호 prefix 허용)
+  const hasReferences =
+    /###?\s*(?:\d+(?:\.\d+)*\.?\s*)?(?:참고\s*문헌|각주|References)/i.test(text);
 
   // 경고 메시지 (사람이 읽을 수 있게)
   const warnings: string[] = [];
