@@ -28,8 +28,8 @@ import {
 } from "@/lib/api";
 import { FootnoteDef, findMatchingFootnote } from "@/lib/markdown";
 
-const POLL_INTERVAL_RUNNING = 2000;
-const POLL_INTERVAL_IDLE = 8000;
+const POLL_INTERVAL_RUNNING = 3000;
+const POLL_INTERVAL_IDLE = 15000;
 
 export default function Page() {
   const [sections, setSections] = useState<Section[]>([]);
@@ -66,6 +66,12 @@ export default function Page() {
 
     // 모든 섹션 본문 캐시 (검토 단계용)
   const [allBodies, setAllBodies] = useState<Record<number, string>>({});
+
+  // 활성 섹션 / 파일 ID — effect dep 안정화용
+  // sections 배열은 폴링마다 새 ref라 그대로 dep로 쓰면 effect가 매번 재실행됨
+  const activeSection = sections.find((s) => s.id === activeSectionId);
+  const activeFileId = activeSection?.fileId;
+  const activeStatus = activeSection?.status;
 
   // 활성 섹션 바뀌면 패널 닫기
   useEffect(() => {
@@ -126,14 +132,14 @@ export default function Page() {
   }, [state?.phase, refreshAll]);
 
   useEffect(() => {
-    const active = sections.find((s) => s.id === activeSectionId);
-    if (!active || !active.fileId) {
+    if (!activeFileId) {
       setActiveBody(undefined);
       return;
     }
     let cancelled = false;
     setBodyLoading(true);
-    fetchFileContent(active.fileId)
+    // setActiveBody(undefined) 호출하지 않음 — fetch 완료 전까지 기존 본문 유지해 깜빡임 방지
+    fetchFileContent(activeFileId)
       .then((text) => {
         if (!cancelled) setActiveBody(text);
       })
@@ -149,10 +155,11 @@ export default function Page() {
     return () => {
       cancelled = true;
     };
-  }, [activeSectionId, sections]);
+  }, [activeSectionId, activeFileId, activeStatus]);
 
   // 모든 섹션 본문을 한 번에 fetch (검토 단계용)
-  // sections가 바뀔 때마다 실행 — 새 섹션이 작성되면 자동 갱신
+  // fileId 시그니처가 바뀔 때만 재실행 — sections ref 변동에 흔들리지 않음
+  const fileIdSig = sections.map((s) => `${s.id}:${s.fileId ?? ""}`).join("|");
   useEffect(() => {
     let cancelled = false;
     const fetchAll = async () => {
@@ -175,7 +182,8 @@ export default function Page() {
     return () => {
       cancelled = true;
     };
-  }, [sections]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileIdSig]);
 
   const handleWriteSection = async (id: number) => {
     setActiveSectionId(id);
@@ -217,7 +225,6 @@ export default function Page() {
     }
   };
 
-  const activeSection = sections.find((s) => s.id === activeSectionId);
   const sectionWithBody: Section | undefined = activeSection
     ? { ...activeSection, body: activeBody }
     : undefined;
@@ -267,8 +274,12 @@ export default function Page() {
     <div
       style={{
         background: "var(--bg-page)",
-        minHeight: "100vh",
-        padding: "16px 20px",
+        height: "100vh",
+        padding: "16px 20px 44px 20px",  // bottom: LogPanel(접힘) 높이 확보
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+        boxSizing: "border-box",
       }}
     >
       <div
@@ -278,6 +289,9 @@ export default function Page() {
           gap: 10,
           maxWidth: 1600,
           margin: "0 auto",
+          width: "100%",
+          flex: 1,
+          minHeight: 0,
         }}
       >
         <Header project={project} status={headerStatus} />
@@ -330,19 +344,23 @@ export default function Page() {
             gap: 10,
             marginTop: 4,
             transition: "grid-template-columns 0.25s ease",
+            flex: 1,
+            minHeight: 0,
           }}
         >
-          <Sidebar
-            project={project}
-            sections={sections}
-            activeSectionId={activeSectionId}
-            onSelectSection={(id) => {
-              setActiveSectionId(id);
-              setStepOverride("write"); // 섹션 선택 시 Write 모드로
-            }}
-            onWriteSection={handleWriteSection}
-            onUpdateRag={handleUpdateRag}
-          />
+          <div style={{ overflow: "auto", minHeight: 0 }}>
+            <Sidebar
+              project={project}
+              sections={sections}
+              activeSectionId={activeSectionId}
+              onSelectSection={(id) => {
+                setActiveSectionId(id);
+                setStepOverride("write"); // 섹션 선택 시 Write 모드로
+              }}
+              onWriteSection={handleWriteSection}
+              onUpdateRag={handleUpdateRag}
+            />
+          </div>
           {isReviewStep ? (
             <div
               style={{
@@ -350,7 +368,8 @@ export default function Page() {
                 border: "0.5px solid var(--border-subtle, #ddd)",
                 borderRadius: "var(--radius-md, 6px)",
                 padding: "20px 24px",
-                minHeight: 400,
+                overflow: "auto",
+                minHeight: 0,
               }}
             >
               <ReviewPanel review={review} />
@@ -365,11 +384,13 @@ export default function Page() {
             />
           )}
           {isPanelOpen && (
-            <SourcePanel
-              source={activeSource!}
-              footnote={matchedFootnote}
-              onClose={() => setActiveSource(null)}
-            />
+            <div style={{ overflow: "auto", minHeight: 0 }}>
+              <SourcePanel
+                source={activeSource!}
+                footnote={matchedFootnote}
+                onClose={() => setActiveSource(null)}
+              />
+            </div>
           )}
         </div>
       </div>

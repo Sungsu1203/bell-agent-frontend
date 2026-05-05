@@ -115,10 +115,16 @@ button {
     color: #000000 !important;
   }
 
-  /* 전체 레이아웃 컨테이너 — 패딩 제거 */
-  body > div {
+  /* 전체 레이아웃 컨테이너 — viewport 고정/스크롤 해제 (인쇄 시 콘텐츠 전체 흐름) */
+  body > div,
+  body > div > div {
     padding: 0 !important;
     background: transparent !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    display: block !important;
   }
 
   /* 인쇄 시 숨길 UI 요소들 */
