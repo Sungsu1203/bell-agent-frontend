@@ -173,6 +173,29 @@ export async function fetchLogs(
   return http(`/api/logs?cursor=${cursor}&limit=${limit}`);
 }
 
+// ───── 사용자 관점 진행 이벤트 ─────
+
+export interface EventItem {
+  seq: number;
+  ts: number;
+  label: string;
+  kind: "phase" | "start" | "done" | "error" | string;
+  detail: string | null;
+}
+
+export interface EventsResponse {
+  ok: boolean;
+  next_cursor: number;
+  events: EventItem[];
+}
+
+export async function fetchEvents(
+  cursor = 0,
+  limit = 200
+): Promise<EventsResponse> {
+  return http(`/api/events?cursor=${cursor}&limit=${limit}`);
+}
+
 // ───── Export (Word 다운로드) ─────
 
 export interface ExportPayload {

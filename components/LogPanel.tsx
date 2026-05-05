@@ -9,6 +9,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useLogs } from "@/lib/useLogs";
+import { useEvents } from "@/lib/useEvents";
 
 // 로그 한 줄을 분석해서 레벨/시간/본문으로 쪼개기
 // 예: "2026-04-30 14:23:01 [INFO] outline 생성 시작"
@@ -34,8 +35,21 @@ const LEVEL_COLORS: Record<string, string> = {
 export function LogPanel() {
   const [expanded, setExpanded] = useState(false);
   const { lines, clear } = useLogs(true); // 항상 폴링 ON
+  const { latest } = useEvents(true);     // 사용자 관점 진행 이벤트
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
+
+  // 최신 이벤트의 색상 — done/error 만 강조, 평소엔 secondary
+  const phaseDot =
+    latest?.kind === "error"
+      ? "var(--accent-warning)"
+      : latest?.kind === "done"
+      ? "var(--accent-success, #2a8)"
+      : latest
+      ? "var(--accent-info, #4a90e2)"
+      : "var(--text-muted, #aaa)";
+  const phaseLabel = latest?.label ?? "대기 중";
+  const phaseIsLive = latest && latest.kind !== "done" && latest.kind !== "error";
 
   // 새 로그가 오면 자동으로 맨 아래로 스크롤
   useEffect(() => {
@@ -82,8 +96,32 @@ export function LogPanel() {
         <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>
           {expanded ? "▼" : "▲"} 진행 로그
         </span>
-        <span style={{ color: "var(--text-secondary)" }}>
-          {lines.length}줄
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            color: "var(--text-primary)",
+            fontWeight: 500,
+          }}
+          title={latest?.detail ?? ""}
+        >
+          <span
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: "50%",
+              background: phaseDot,
+              animation: phaseIsLive
+                ? "logpanel-pulse 1.4s ease-in-out infinite"
+                : "none",
+              flexShrink: 0,
+            }}
+          />
+          {phaseLabel}
+        </span>
+        <span style={{ color: "var(--text-tertiary)", fontSize: 11 }}>
+          · {lines.length}줄
         </span>
         <div style={{ flex: 1 }} />
         {expanded && (
@@ -118,6 +156,13 @@ export function LogPanel() {
           </>
         )}
       </div>
+
+      <style>{`
+        @keyframes logpanel-pulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.45; transform: scale(0.8); }
+        }
+      `}</style>
 
       {/* 로그 본문 (펼쳤을 때만 보임) */}
       {expanded && (

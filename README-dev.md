@@ -25,13 +25,15 @@ D:\Bell_Agent\frontend
 │  ├─ ReportCanvas.tsx            # 본문 영역 — 마크다운 렌더, 인용 칩, 액션(Word/PDF/복사)
 │  ├─ SourcePanel.tsx             # 우측 출처 상세 (인용 칩 클릭 시 열림)
 │  ├─ ReviewPanel.tsx             # review 단계 자동 점검 화면
-│  └─ LogPanel.tsx                # 화면 하단 고정 로그 콘솔 (펼치기/자동 스크롤)
+│  ├─ LogPanel.tsx                # 화면 하단 고정 로그 콘솔 — 헤더에 현재 진행 단계 라벨 + 펼치면 원시 로그
+│  └─ ChatResponsePanel.tsx       # 명령 응답 우측 패널 (출처 패널과 슬롯 공유)
 │
 ├─ lib/                        # 비-UI 로직 (브라우저 환경 가정, 외부 I/O 격리)
 │  ├─ api.ts                      # 백엔드 FastAPI 호출 파사드 — fetch는 모두 여기서
 │  ├─ data.ts                     # UI 도메인 타입 + 백엔드→UI 변환 + 검토(reviewReport) 로직
 │  ├─ markdown.ts                 # 마크다운 → 블록/푸트노트 파서 (캔버스·출처 패널 공유)
-│  └─ useLogs.ts                  # /api/logs 폴링 훅 (커서 기반)
+│  ├─ useLogs.ts                  # /api/logs 폴링 훅 (커서 기반)
+│  └─ useEvents.ts                # /api/events 폴링 훅 — 사용자 관점 진행 이벤트 (LogPanel 헤더 라벨 공급)
 │
 ├─ public/                     # 정적 자산 (현재 next.js 기본 svg만)
 ├─ next.config.ts              # 빈 설정 (Next 기본값 사용)
@@ -175,6 +177,7 @@ LogPanel mount → useLogs(true) → 2초마다 GET /api/logs?cursor=N
   - `fetchFiles(kind, limit)` — `/api/files?kind=artifact|report|reportlog`
   - `fetchFileContent(fileId)` — `/api/files/<id>` (text 또는 JSON 자동 파싱)
   - `fetchLogs(cursor, limit)` — `/api/logs` (커서 기반 증분)
+  - `fetchEvents(cursor, limit)` — `/api/events` (사용자 관점 진행 이벤트, 명령마다 buffer reset; cursor reset 감지는 `next_cursor < cursor` 비교)
   - `downloadExport({ kind, section_id, format })` — POST `/api/export` (docx 바이너리 + 한글 파일명 다운로드 트리거)
 
 - **`lib/data.ts`**: 백엔드 응답을 UI 모델로 변환 + 자동 검토
@@ -209,6 +212,7 @@ LogPanel mount → useLogs(true) → 2초마다 GET /api/logs?cursor=N
 - `OutlineResponse = { items: string[], source: "topic" | "default" | "empty" }`
 - `FilesResponse = { files: FileMeta[] }`, `FileMeta = { id, name, path, mtime, size }`
 - `LogsResponse = { lines: { seq, line }[], next_cursor }`
+- `EventsResponse = { events: EventItem[], next_cursor }`, `EventItem = { seq, ts, label, kind: "phase"|"start"|"done"|"error", detail }`
 
 마크다운 블록 (`lib/markdown.ts`):
 
@@ -537,6 +541,26 @@ UI 검증은 수동 — 작업 후 `npm run dev` → 브라우저에서 골든 �
   - **`minHeight:0` 의무**: flex 자식이 부모 안에서 `overflow:auto` 로 작동하려면 자식 자체에 `minHeight:0` 가 필요(flex item 기본 `min-height:auto` 가 콘텐츠 크기로 늘어나는 것을 막음). 본 변경의 `flex:1, minHeight:0` 한 쌍은 항상 같이 다녀야 함.
   - **LogPanel 가림 방지**: LogPanel 은 `position:fixed; bottom:0` 이라 viewport 고정 컨테이너 밖에서 동작하지만, 보고서 본문 하단이 LogPanel 에 가려질 수 있음 → 최상위 `padding-bottom:44px` (접힌 LogPanel 높이) 로 시각적 여백 확보. LogPanel 펼친 상태(240px+) 는 일시적이고 본문 자체 스크롤로 접근 가능하므로 동적 padding 까지는 불필요.
   - 본 변경은 §12-4 (인쇄 CSS 견고성) 와 직결 — pending 항목이지만 본 박제로 짝 규칙 1건은 명문화됨.
+
+### 12-12. 진행 로그 헤더에 사용자 관점 단계 라벨 — 상태: `closed (2026-05-05)` / 의존: 백엔드 `/api/events` / 우선순위: 중
+
+- **발견 (2026-05-05)**: 사용자 보고 "진행로그는 백엔드 로그 파일 내용을 보여주는 것이었어. 사용자 관점에서 supervisor → web-search → vector-search 같은 핵심 흐름과 주요 작업을 알려주는 것이 더 의미가 있어." LogPanel 이 접힘 상태에서 "▲ 진행 로그 N줄" 만 보여줘 사용자가 현재 어느 단계인지 알 수 없음.
+- **설계 결정**: 두 후보 중 (b) 선택.
+  - (a) 프런트가 기존 원시 로그를 정규식 분류 — 백엔드 무수정이지만 노드 이름/로그 포맷 변경 시 깨짐. 계약 없음.
+  - (b) 백엔드에 구조화 이벤트 채널 신설 — `core/events.py` 의 `emit_event(label, kind, detail)` 헬퍼 + `_EVENT_BUFFER` deque + `/api/events` cursor 폴링. 노드 진입에 한 줄씩 박음. 초기 작업 ~1.5h 더 들지만 라벨 추가가 한 줄 변경이라 이후 운영비 낮음.
+- **구현 (frontend 측)**:
+  - `lib/api.ts` — `EventItem` / `EventsResponse` / `fetchEvents()` 추가. `kind: "phase" | "start" | "done" | "error"` 4종.
+  - `lib/useEvents.ts` 신설 — `useLogs` 미러 (cursor 폴링). 폴링 주기 1.5s (로그 2s 보다 짧게 — 단계 전환 반응성 우선).
+  - `components/LogPanel.tsx` — 헤더에 도트 + 최신 이벤트 라벨 + 줄 수 보조. 도트 색상은 phase=info / done=success / error=warning / 없음=muted. `kind != done && kind != error` 일 때만 펄스 애니메이션 (실행 중임을 시각적으로). `latest?.detail` 은 hover title 로.
+- **버그 1건 (close 직전 발견)**: cursor reset 미감지로 두 번째 명령부터 헤더가 멈춤.
+  - 시나리오: Run 1 후 frontend cursor=7. 사용자가 Run 2 실행 → 백엔드 `clear_events()` 가 `_EVENT_SEQ` 를 0 으로 되돌리고 buffer 비움 → 첫 emit 으로 seq=1 발생. Frontend polls cursor=7 → buffer 의 seq=1 < 7 이라 필터 통과 못 함, `out=[]`, `next_cursor=7` 반환 → frontend 의 reset 감지 조건 `next_cursor < cursor` 가 `7 < 7 == false` → 영원히 새 이벤트 못 받음.
+  - 백엔드 `core/events.py:get_events_since()` 에 명시 reset 신호 추가: caller cursor 가 현재 `_EVENT_SEQ` 보다 크면 `(_EVENT_SEQ, [])` 반환 → frontend 가 `next_cursor < cursor` 로 감지하고 cursor=0 으로 리셋.
+  - 본 패턴은 backend reset + monotonic-from-zero seq 조합 시 일반화되는 함정 — 다른 cursor 폴링 채널 추가 시 동일 가드 필요. (`useLogs` 는 buffer 가 reset 되지 않아 해당 사항 없음.)
+- **검증**: 백엔드 재시작 후 명령 두 번 연속 실행 → 첫 명령은 "대기 중" → "작업 시작" → "작업 분석" → ... → "작업 완료" 흐름. 두 번째 명령 시 1.5s 내 라벨 갱신 시작 확인.
+- **박제 후기**:
+  - **이벤트 라벨 디자인**: 노드 이름(supervisor/communicator/...) 그대로가 아니라 한국어 사용자 라벨로. 예: `supervisor → "작업 분석"`, `web_search_agent → "웹 검색"`, `section_writer → "섹션 본문 작성"`. 노드 추가 시 백엔드의 emit_event 호출 라벨도 함께 정해야 함 — 백엔드 `agent/<node>.py` 의 logger banner 직후가 진입점 관습.
+  - **slot 분리 invariant**: 진행 로그 패널 = 개발자용 원시 stream / 진행 단계 헤더 = 사용자용 요약. 두 채널을 한 패널 안에서 펼침/접힘으로 분리한 설계가 핵심 — §12-앞쪽 `ChatResponsePanel` 을 LogPanel 에 섞었던 1차 시도(직전 세션) 가 가독성 문제로 분리한 결정과 동일 라인.
+  - **앞으로의 가드**: 새 LangGraph 노드 추가 시 backend `agent/<node>.py` 의 emit_event 한 줄 의무. 라벨 누락 시 헤더가 이전 단계에 정체됨. 백엔드 `writer_project/README-dev.md` §12-14 와 짝.
 
 ---
 
