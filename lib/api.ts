@@ -137,8 +137,10 @@ export async function fetchFiles(
 }
 
 export async function fetchFileContent(fileId: string): Promise<string> {
+  // §12-14: cache: 'no-store' 로 브라우저 캐시 우회.
+  // 동일 fileId 의 파일이 백엔드에서 갱신돼도 캐시된 응답이 재사용되던 문제 차단.
   const url = `${API_BASE}/api/files/${encodeURIComponent(fileId)}`;
-  const res = await fetch(url);
+  const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status} ${res.statusText}`);
   }

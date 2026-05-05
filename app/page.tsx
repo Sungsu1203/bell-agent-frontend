@@ -82,6 +82,8 @@ export default function Page() {
   const activeSection = sections.find((s) => s.id === activeSectionId);
   const activeFileId = activeSection?.fileId;
   const activeStatus = activeSection?.status;
+  // §12-14: 동일 fileId 라도 백엔드 파일 갱신 시 mtime 변화 → 본문 재fetch 트리거.
+  const activeFileMtime = activeSection?.fileMtime;
 
   // 활성 섹션 바뀌면 패널 닫기
   useEffect(() => {
@@ -165,11 +167,14 @@ export default function Page() {
     return () => {
       cancelled = true;
     };
-  }, [activeSectionId, activeFileId, activeStatus]);
+  }, [activeSectionId, activeFileId, activeStatus, activeFileMtime]);
 
   // 모든 섹션 본문을 한 번에 fetch (검토 단계용)
-  // fileId 시그니처가 바뀔 때만 재실행 — sections ref 변동에 흔들리지 않음
-  const fileIdSig = sections.map((s) => `${s.id}:${s.fileId ?? ""}`).join("|");
+  // fileId+mtime 시그니처가 바뀔 때만 재실행 — sections ref 변동에 흔들리지 않음
+  // §12-14: mtime 포함 → 동일 fileId 라도 백엔드 파일 갱신 시 캐시 갱신.
+  const fileIdSig = sections
+    .map((s) => `${s.id}:${s.fileId ?? ""}:${s.fileMtime ?? ""}`)
+    .join("|");
   useEffect(() => {
     let cancelled = false;
     const fetchAll = async () => {

@@ -575,6 +575,47 @@ UI 검증은 수동 — 작업 후 `npm run dev` → 브라우저에서 골든 �
   - 새로 라우터/가드를 추가할 때 in-memory state (`references`, 세션 단위) 와 disk state (`rag_on_disk`, `rag_stats`, 영속) 를 둘 다 봐야 한다는 규칙. references 만 보고 RAG 자체가 없다고 가정하면 서버 재시작 직후 / 새 세션 첫 명령에서 빗나감.
   - supervisor 본함수의 `[fast-path] ... → A → B` 로그와 직후 `============ A 또는 B ============` banner 가 일치하는지 운영 점검 항목. 어긋나면 supervisor_router 의 가드가 본함수 의도를 무력화하는 케이스 의심.
 
+### 12-14. 인용 칩 마커 매칭 + 본문 자동 갱신 회귀 — 상태: `closed (2026-05-06)` / 의존: 백엔드 §12-16 (Part A 짝) / 우선순위: 높음
+
+**Part A — 인용 칩 → 출처 패널 매칭 차단** (백엔드 §12-16 의 프런트 측 짝)
+
+- **출처**: 사용자 보고 (2026-05-06) — 본문 `[일반의약품_마케팅_분석]`, `[Ipsos_보고서]` 같은 라벨 클릭 시 출처 패널 안 열림. 참고문헌엔 풀 파일명만 등장.
+- **frontend 측 진단**: (1) `components/ReportCanvas.tsx:628` regex 가 `[XXX.확장자]` 만 chip 으로 매칭 — 확장자 없는 라벨은 일반 텍스트 (클릭 핸들러 부재). (2) `lib/markdown.ts:findMatchingFootnote` 는 fileName/prettyUrl 정확/부분 매칭만 — LLM 합성 라벨과 footnote.fileName 사이 공통 부분문자열 부재.
+- **frontend 패치**: `lib/markdown.ts:findMatchingFootnote` 첫 분기로 **마커 매칭** 추가 — `fn.marker === source` 가 정확히 일치하면 즉시 반환. 백엔드 §12-16 의 `attach_marker_citations` 가 본문 [[N]] ↔ footer [^N] 1:1 보장하므로 모호성 0. 라벨 매칭보다 우선.
+- **frontend 코드 변경 1줄 + 가드 주석**:
+  ```ts
+  // 0) 마커 매칭 (§12-14): [[1]] 칩 → fn.marker === "1"
+  for (const fn of footnotes) {
+    if (fn.marker === source) return fn;
+  }
+  ```
+- **검증**: 본문 [[1]] [[2]] [[3]] [[4]] chip 정상 렌더링 + 클릭 시 출처 패널이 정확한 fileName/URL 로 열림. footer 도 1,2,3,4 순 정렬.
+
+**Part B — write 후 본문 자동 갱신 실패 (브라우저 캐시 + dep 미감지)**
+
+- **출처**: 사용자 보고 (2026-05-06, Part A 검증 직후) — write 완료 후 프런트엔드 섹션 본문이 자동으로 안 바뀜. `Ctrl+Shift+R` 강제 새로고침해야 새 본문 보임.
+- **두 겹 캐시 진단**:
+  - **(1) 브라우저 fetch 캐시** (`lib/api.ts:fetchFileContent`): 옵션 미지정으로 기본 `default` 캐시 정책. 동일 URL 응답이 캐시에 잡혀 새 본문 fetch 가 캐시된 응답으로 단축. `Ctrl+Shift+R` 이 정확히 이 캐시 우회.
+  - **(2) useEffect dep 미감지** (`app/page.tsx:168`): dep 가 `[activeSectionId, activeFileId, activeStatus]` 인데 동일 섹션을 다시 write 하면 fileId 그대로 + status `done → done` 그대로 → dep 변화 0 → fetchFileContent useEffect 재실행 안 됨. 폴링이 `refreshAll()` 을 돌려도 본문 fetch 트리거 부재.
+- **frontend 패치 (3 파일)**:
+  | 파일 | 변경 |
+  |---|---|
+  | `lib/api.ts:141` | `fetch(url, { cache: "no-store" })` — 브라우저 fetch 캐시 우회 |
+  | `lib/data.ts:14, 116` | `Section.fileMtime?: number` 추가 + `buildSections` 에서 `file.mtime` 채움 |
+  | `app/page.tsx:84, 168, 172` | 활성 섹션 useEffect dep 에 `activeFileMtime` 추가 + 검토용 `fileIdSig` 에 mtime 포함 |
+- **갱신 흐름 (검증)**: write → 백엔드 파일 덮어쓰기 → mtime 변경 → 다음 폴링(`POLL_INTERVAL_RUNNING=3000ms` 또는 `IDLE=15000ms`) 또는 `handleWriteSection` 의 `refreshAll()` 시 `fetchFiles` 가 새 mtime 반환 → `Section.fileMtime` 갱신 → `activeFileMtime` 변화 → useEffect 재실행 → `fetchFileContent`(cache: no-store) → 화면 자동 갱신.
+
+**일반화 교훈 (frontend 데이터 흐름)**:
+- **동일 URL fetch 는 cache 옵션 명시 필수**: 백엔드가 매번 다른 본문을 줄 수 있는 엔드포인트는 `cache: "no-store"` 를 명시해야 한다. 명시 없으면 브라우저가 RFC 7234 휴리스틱으로 캐시 → 의도와 다른 응답 재사용. 다른 fetch (fetchOutline, fetchFiles, fetchState, fetchLogs 등) 도 같은 위험 — 폴링 시 응답이 갱신돼야 하는 자원은 모두 점검 후보.
+- **useEffect dep 시그니처는 변경 감지 가능한 필드를 포함해야**: 식별자(fileId) 만으로 부족. 동일 식별자라도 내용이 갱신될 수 있는 자원은 mtime/version/etag 같은 변경 시그니처를 함께 dep 에 넣어야 React 가 재실행 트리거. fileId/status 동일 시 useEffect 가 영원히 재실행 안 되는 패턴은 폴링 데이터 모델의 일반 함정.
+- **사용자 보고 "Ctrl+Shift+R 하면 보임" 은 캐시 진단 신호**: 강제 새로고침으로만 회복되는 회귀는 99% 브라우저 캐시 또는 React state stale. 두 layer 모두 점검.
+
+**짝 박제**: 백엔드 측 `writer_project/README-dev.md` §12-16 (인용 매핑 마커 통일 본체). Part A 가 백엔드 §12-16 의 프런트 측 매칭 라인.
+
+**follow-up 후보**:
+- chip 디스플레이 개선: 현재 [[1]] chip 의 텍스트가 "1" 만 표시 → footnotes prop 을 `renderInline → CitationChip` 까지 drilling 해서 fileName/prettyUrl 표시. UX 측면 개선이지 동작은 정상.
+- 다른 fetch 함수의 cache 정책 일제 점검 (fetchOutline/fetchFiles/fetchState/fetchLogs).
+
 ---
 
 ## 13) 알려진 이슈/주의사항

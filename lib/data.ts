@@ -12,6 +12,8 @@ export interface Section {
   status: SectionStatus;
   body?: string;
   fileId?: string;
+  // §12-14: 동일 fileId 라도 백엔드가 파일을 다시 쓰면 mtime 변경 → 본문 재fetch 트리거에 사용.
+  fileMtime?: number;
 }
 
 export interface Project {
@@ -114,6 +116,7 @@ export function buildSections(
       rawTitle: raw,
       status: isDone ? "done" : "pending",
       fileId: file?.id,
+      fileMtime: file?.mtime,
     };
   });
 

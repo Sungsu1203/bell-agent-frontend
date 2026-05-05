@@ -325,6 +325,14 @@ export function findMatchingFootnote(
   source: string,
   footnotes: FootnoteDef[]
 ): FootnoteDef | null {
+  // 0) 마커 매칭 (§12-14): [[1]] 칩 → fn.marker === "1"
+  // 백엔드 attach_marker_citations 가 본문 [[N]] ↔ footer [^N] 을 1:1 보장하므로
+  // 모호성 0. 라벨/파일명 매칭보다 우선.
+  for (const fn of footnotes) {
+    if (fn.marker === source) {
+      return fn;
+    }
+  }
   // 1) 정확 매칭 (파일명 또는 prettyUrl)
   for (const fn of footnotes) {
     if (fn.fileName === source || fn.prettyUrl === source) {
