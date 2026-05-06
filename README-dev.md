@@ -640,6 +640,58 @@ UI 검증은 수동 — 작업 후 `npm run dev` → 브라우저에서 골든 �
   - **모듈 해석 에러의 해석법**: `Can't resolve 'X' in '<예상치 못한 경로>'` 패턴은 99% 모듈 자체 부재가 아니라 **어디서부터 찾기 시작했나** 의 문제. resolve 시작점을 먼저 확인 (`details` 의 첫 줄) → 그 시작점이 의도한 프로젝트 root 인지 검증.
   - **next.config.ts 의 위치**: 기존엔 빈 설정 (§1) 이었는데 이제 turbopack 항목이 들어감. 다른 설정 (예: webpack alias, env, redirects) 추가 시에도 같은 파일에 합치고 §1 의 한 줄 설명을 동기화 의무.
 
+### 12-16. 출처 상세 패널 — chunk 원본 표시 (사이드카 `.refs.json`) — 상태: `closed (2026-05-06)` / 의존: 백엔드 §12-21 (짝) / 우선순위: 중
+
+- **출처**: 사용자 보고 (2026-05-06) — "출처 상세 창에서 chunk 의 내용을 함께 나타나게 할 수 있을까? 섹션에서 인용한 구체적인 내용에 대해 힌트를 얻으면 도움이 많이 될 것 같아." SourcePanel 이 fileName/URL/경로만 보여줘 사용자가 인용 본문을 보려면 원본 파일을 직접 열어야 했음.
+- **설계 결정**: 두 옵션 중 (A) 선택.
+  - (A) 백엔드 사이드카 JSON: 섹션 작성 시점에 `<section>.refs.json` 박제 → 프런트가 marker 키로 조회.
+  - (B) footnote 라인에 chunk 발췌 inline. 구현 단순하지만 Word/PDF export 시 footnote 가 지저분해지고 발췌 길이 제한이 메시지 품질을 깎음.
+  - (A) 가 §7-1 footnote 형식 규약을 건드리지 않음 + chunk 풀 텍스트 저장 가능. 사용자 요구도 "발췌는 chunk 원본 그대로"라 (A) 와 정합.
+- **구현 (frontend, 3 파일)**:
+  | 파일 | 변경 |
+  |---|---|
+  | `lib/api.ts` | `SectionRefEntry` / `SectionRefsResponse` 타입 + `fetchSectionRefs(fileId)` 추가. `cache: "no-store"` 명시 (§12-14 규약 — 동일 URL 갱신 가능 자원). 응답이 빈 맵일 수 있으므로 `data.refs ?? {}` 폴백. |
+  | `app/page.tsx` | `activeRefs: Record<string, SectionRefEntry>` state + 활성 섹션 fetch effect (dep: `[activeSectionId, activeFileId, activeStatus, activeFileMtime]` — §12-14 시그니처와 동일). SourcePanel 마운트 지점에 `refEntry={matchedFootnote ? activeRefs[matchedFootnote.marker] ?? null : null}` 전달. |
+  | `components/SourcePanel.tsx` | `refEntry?: SectionRefEntry \| null` prop 추가. "인용 위치" 필드 다음에 "인용 내용" Field 신설 — `whiteSpace: "pre-wrap"`, `maxHeight: 320`, `overflowY: "auto"`, `--bg-muted` 배경 + `--border-subtle` 0.5px. `refEntry?.text` 비어있으면 영역 자체 미렌더 (옛 섹션 호환). |
+- **데이터 흐름 (검증)**:
+  - 섹션 새로 write → 백엔드가 `attach_marker_citations` 호출 *전* `build_marker_refs_map` 으로 marker → `{text, url, label, ...}` 맵 캡처 → `<section>.refs.json` 박제 → 다음 폴링에서 `mtime` 변화 → 활성 섹션이면 page.tsx 가 `fetchSectionRefs` 재호출 → SourcePanel 칩 클릭 시 `activeRefs[marker].text` 렌더.
+  - 사용자측 검증: 가운뎃점 섹션(§12-8) 의 chip 클릭 → 출처 상세 패널의 "인용 내용" 영역에 chunk 본문이 그대로 표시되는지 확인.
+- **앞으로의 가드 / 일반화 교훈**:
+  - **marker 매칭 키는 string**: 백엔드 사이드카 키도 문자열(`"1"`), `FootnoteDef.marker` 도 문자열. 비교 시 형변환 불필요. 새 footnote 채널이 정수 marker 를 쓰면 비교 차단됨에 주의.
+  - **사이드카 부재 시 빈 맵 폴백**: 옛 섹션은 `.refs.json` 없음 → 백엔드가 `{refs: {}}` 반환 → 프런트는 `activeRefs[marker]` 가 `undefined` → SourcePanel 이 영역 미렌더. 정상 fallback. 사용자가 옛 섹션을 다시 write 하면 자동 보강.
+  - **fetch dep 시그니처 동기화**: 본문 fetch effect 와 refs fetch effect 가 같은 dep 시그니처 `[activeSectionId, activeFileId, activeStatus, activeFileMtime]` 사용. 둘 중 하나만 갱신되는 회귀 차단.
+- **짝 박제**: 백엔드 `writer_project/README-dev.md` §12-21 (사이드카 본체).
+- **follow-up 후보**:
+  - 인용 내용 길이가 매우 길 때(>320px) 자체 스크롤 + "전체 보기" 토글 검토.
+  - 사이드카를 git 추적할지 결정 — 현재 `sections/<topic>/*.md` 추적 정책에 맞춰 `*.refs.json` 도 함께 추적하는 것이 일관적이나, 풀 텍스트라 diff 가 커질 수 있어 별도 검토.
+  - chip 디스플레이 개선 (§12-14 follow-up): footnote drilling 으로 [[1]] chip 에 fileName 표시 — 본 사이드카가 chunk text 까지 노출하므로 chip 디스플레이 개선 우선순위 다소 낮아짐.
+
+### 12-17. 출처 상세 — chunk 요약(summary) primary + 원본 chunk 토글 — 상태: `closed (2026-05-06)` / 의존: 백엔드 §12-22 (짝) / 우선순위: 중
+
+- **출처**: 사용자 보고 (2026-05-06, §12-16 검증 직후) — "인용내용이 그대로 다 나오니 오히려 더 헷갈리네. LLM이 본문에서 인용한 맥락을 고려해서 정제한 핵심 내용만 요약해서 보여주는 방법을 해보면 어떨까?" raw chunk 가 길고 dense 해서 사용자가 핵심을 즉시 파악하기 어려운 UX 문제.
+- **설계 결정 (write 시점 동기 vs background)**: 동기 LLM 호출 4~8개를 섹션 write 에 끼우면 평균 +2~3초, tail 5~10초 + 섹션 저장 성공이 요약 LLM 가용성에 결합. 사용자 우려 표명 → **background after save (선택)**: 백엔드가 섹션 저장 직후 daemon thread 로 요약 생성 → 사이드카에 점진 추가. 프런트는 short-poll 로 자연 수렴.
+- **frontend 구현 (3 파일)**:
+  | 파일 | 변경 |
+  |---|---|
+  | `lib/api.ts` | `SectionRefEntry.summary?: string` 옵셔널 필드 추가. 백엔드 백그라운드 daemon 이 점진 채움. |
+  | `app/page.tsx` | refs fetch effect 를 short-poll 로 전환 — 모든 entry 가 `summary` 갖출 때까지 4초 간격 재호출, 완료 시 자동 종료. 사이드카 부재(옛 섹션) 또는 entries 0개면 즉시 종료. |
+  | `components/SourcePanel.tsx` | "인용 내용" Field 재구성: `summary` primary 박스, 없으면 "요약 생성 중…" italic placeholder. 그 아래 "원본 chunk 보기 ▾" 토글 (`useState(showRawChunk)`) 로 raw `text` 펼침. |
+- **데이터 흐름**:
+  - 섹션 write → 백엔드 사이드카 raw text 즉시 저장 + daemon thread 시작 → 프런트 fetchSectionRefs 응답에 summary 미존재 → "요약 생성 중…" 표시 + 4s 간격 재폴링 → daemon thread 완료 marker 부터 사이드카 atomic merge → 다음 폴링에서 summary 채워짐 → placeholder 가 summary 로 자연 교체.
+  - 모든 marker 완료되면 `entries.every((e) => Boolean(e.summary))` true → `setTimeout` 미예약 → 폴링 자동 종료.
+- **UX 원칙**:
+  - **summary 가 default** — 사용자가 칩 클릭 시 즉시 정제된 핵심 표시.
+  - **원본 chunk 는 명시적 액션** — 토글 클릭해야 펼쳐짐. 첫 화면이 요약만으로 깔끔.
+  - **"생성 중" 상태도 신호 명시** — italic + dashed border 로 placeholder 가 transient 상태임을 시각화.
+- **앞으로의 가드 / 일반화 교훈**:
+  - **백그라운드 채워지는 데이터의 short-poll 패턴**: 폴링 자체 종료 조건을 응답 내용으로 결정 (모든 항목이 채워지면 stop). backend 의 push 신호 없이도 자연 수렴 — backend 단순성 우선의 frontend 패턴.
+  - **dep 시그니처 vs 폴링의 분리**: dep `[activeSectionId, activeFileId, activeStatus, activeFileMtime]` 변경은 effect 재실행 (다른 섹션으로 전환 등). 같은 dep 안에서의 점진 갱신은 effect 내부의 setTimeout 재귀로 처리. 두 패턴이 같이 쓰여도 서로 충돌 안 함.
+  - **요약 부재 fallback 의 표현**: "loading" 같은 영문 spinner 가 아니라 한국어 "요약 생성 중…" + 사용자가 무엇을 기다리는지 명시. UX 텍스트도 디자인 토큰처럼 일관성 유지.
+- **짝 박제**: 백엔드 `writer_project/README-dev.md` §12-22 (background daemon 본체).
+- **follow-up 후보**:
+  - 짧은 chunk (예: <100자) 는 요약이 chunk 본문과 거의 동일 → 요약 생략하고 raw 만 보여주는 게 자연스러울 수 있음. 백엔드 또는 프런트에서 길이 기반 분기 검토.
+  - 요약 품질이 사용자 기대와 어긋나면 백엔드 프롬프트 튜닝 필요 (§12-22 follow-up). 본 frontend 변경은 그대로 유지.
+
 ---
 
 ## 13) 알려진 이슈/주의사항

@@ -162,6 +162,34 @@ export async function fetchFileContent(fileId: string): Promise<string> {
   return text;
 }
 
+export interface SectionRefEntry {
+  marker: string;
+  url: string;
+  label: string;
+  text: string;
+  source?: string;
+  title?: string;
+  // §12-22: 백엔드 백그라운드 daemon 이 점진 추가. 섹션 작성 직후엔 부재 → 폴링으로 자연 채워짐.
+  summary?: string;
+}
+
+export interface SectionRefsResponse {
+  ok: boolean;
+  id: string;
+  refs: Record<string, SectionRefEntry>;
+}
+
+export async function fetchSectionRefs(fileId: string): Promise<Record<string, SectionRefEntry>> {
+  // §12-16: 섹션 .md 옆 .refs.json 사이드카 조회. 파일 없으면 백엔드가 빈 맵 반환 (404 대신).
+  const url = `${API_BASE}/api/section-refs/${encodeURIComponent(fileId)}`;
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status} ${res.statusText}`);
+  }
+  const data = (await res.json()) as SectionRefsResponse;
+  return data.refs ?? {};
+}
+
 export interface LogsResponse {
   ok: boolean;
   next_cursor: number;

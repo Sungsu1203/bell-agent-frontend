@@ -24,7 +24,9 @@ import {
   fetchFiles,
   fetchState,
   fetchFileContent,
+  fetchSectionRefs,
   runCommand,
+  SectionRefEntry,
   StateResponse,
 } from "@/lib/api";
 import { FootnoteDef, findMatchingFootnote } from "@/lib/markdown";
@@ -61,6 +63,8 @@ export default function Page() {
   // ───── 출처 패널 상태 ─────
   const [footnotes, setFootnotes] = useState<FootnoteDef[]>([]);
   const [activeSource, setActiveSource] = useState<string | null>(null);
+  // §12-16: 활성 섹션의 marker → chunk 메타 (사이드카 .refs.json)
+  const [activeRefs, setActiveRefs] = useState<Record<string, SectionRefEntry>>({});
 
   // 사용자가 명시적으로 보고 있는 단계 (자동 계산 override)
   const [stepOverride, setStepOverride] = useState<string | null>(null);
@@ -166,6 +170,38 @@ export default function Page() {
       });
     return () => {
       cancelled = true;
+    };
+  }, [activeSectionId, activeFileId, activeStatus, activeFileMtime]);
+
+  // §12-16: 활성 섹션의 사이드카 .refs.json fetch — 본문 fetch 와 같은 dep 시그니처 사용.
+  // §12-17: summary 가 백그라운드로 채워지므로 모든 marker 가 summary 갖출 때까지 short-poll (4s).
+  // 모든 summary 완료되면 자동 종료. 사이드카 부재(옛 섹션)는 빈 맵으로 즉시 종료.
+  useEffect(() => {
+    if (!activeFileId) {
+      setActiveRefs({});
+      return;
+    }
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const tick = async () => {
+      try {
+        const refs = await fetchSectionRefs(activeFileId);
+        if (cancelled) return;
+        setActiveRefs(refs);
+        const entries = Object.values(refs);
+        const allDone =
+          entries.length === 0 || entries.every((e) => Boolean(e.summary));
+        if (!allDone) {
+          timer = setTimeout(tick, 4000);
+        }
+      } catch {
+        if (!cancelled) setActiveRefs({});
+      }
+    };
+    tick();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
     };
   }, [activeSectionId, activeFileId, activeStatus, activeFileMtime]);
 
@@ -428,6 +464,9 @@ export default function Page() {
                 <SourcePanel
                   source={activeSource!}
                   footnote={matchedFootnote}
+                  refEntry={
+                    matchedFootnote ? activeRefs[matchedFootnote.marker] ?? null : null
+                  }
                   onClose={() => setActiveSource(null)}
                 />
               )}

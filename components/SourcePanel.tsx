@@ -3,15 +3,20 @@
 
 import { useState, useEffect } from "react";
 import { FootnoteDef } from "@/lib/markdown";
+import { SectionRefEntry } from "@/lib/api";
 
 interface SourcePanelProps {
   source: string;          // 클릭한 칩의 텍스트 (예: "아이커_운영제안.pptx")
   footnote: FootnoteDef | null;
+  // §12-16: 사이드카 .refs.json 의 marker 항목 — chunk 원본 텍스트를 패널에 표시.
+  // null/undefined 면 chunk 영역 숨김 (옛 섹션 호환).
+  refEntry?: SectionRefEntry | null;
   onClose: () => void;
 }
 
-export function SourcePanel({ source, footnote, onClose }: SourcePanelProps) {
+export function SourcePanel({ source, footnote, refEntry, onClose }: SourcePanelProps) {
   const [copied, setCopied] = useState(false);
+  const [showRawChunk, setShowRawChunk] = useState(false);
 
   // ESC 키로 닫기
   useEffect(() => {
@@ -220,6 +225,84 @@ export function SourcePanel({ source, footnote, onClose }: SourcePanelProps) {
                 >
                   {footnote.chunkInfo}
                 </code>
+              </Field>
+            )}
+
+            {/* §12-16/§12-17: 인용 내용 — summary 가 primary, raw chunk 는 토글로 펼침 */}
+            {(refEntry?.summary || refEntry?.text) && (
+              <Field label="인용 내용">
+                {refEntry?.summary ? (
+                  <div
+                    style={{
+                      fontSize: 13,
+                      color: "var(--text-primary)",
+                      lineHeight: 1.6,
+                      background: "var(--bg-muted)",
+                      padding: "12px 14px",
+                      borderRadius: "var(--radius-sm)",
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                      border: "0.5px solid var(--border-subtle)",
+                    }}
+                  >
+                    {refEntry.summary}
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: "var(--text-tertiary)",
+                      fontStyle: "italic",
+                      padding: "10px 14px",
+                      background: "var(--bg-muted)",
+                      borderRadius: "var(--radius-sm)",
+                      border: "0.5px dashed var(--border-subtle)",
+                    }}
+                  >
+                    요약 생성 중… 잠시 후 자동으로 갱신됩니다.
+                  </div>
+                )}
+                {refEntry?.text && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setShowRawChunk((v) => !v)}
+                      style={{
+                        marginTop: 8,
+                        fontSize: 11,
+                        color: "var(--text-secondary)",
+                        background: "transparent",
+                        border: "none",
+                        padding: "4px 0",
+                        cursor: "pointer",
+                        textDecoration: "underline",
+                        textUnderlineOffset: 2,
+                      }}
+                    >
+                      {showRawChunk ? "원본 chunk 숨기기 ▴" : "원본 chunk 보기 ▾"}
+                    </button>
+                    {showRawChunk && (
+                      <div
+                        style={{
+                          marginTop: 6,
+                          fontSize: 12,
+                          color: "var(--text-secondary)",
+                          lineHeight: 1.55,
+                          background: "var(--bg-muted)",
+                          padding: "10px 12px",
+                          borderRadius: "var(--radius-sm)",
+                          whiteSpace: "pre-wrap",
+                          wordBreak: "break-word",
+                          maxHeight: 240,
+                          overflowY: "auto",
+                          border: "0.5px solid var(--border-subtle)",
+                        }}
+                      >
+                        {refEntry.text}
+                      </div>
+                    )}
+                  </>
+                )}
               </Field>
             )}
 
