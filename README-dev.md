@@ -36,7 +36,7 @@ D:\Bell_Agent\frontend
 │  └─ useEvents.ts                # /api/events 폴링 훅 — 사용자 관점 진행 이벤트 (LogPanel 헤더 라벨 공급)
 │
 ├─ public/                     # 정적 자산 (현재 next.js 기본 svg만)
-├─ next.config.ts              # 빈 설정 (Next 기본값 사용)
+├─ next.config.ts              # turbopack.root 명시 (§12-15) — 그 외엔 기본값
 ├─ tsconfig.json               # strict + paths "@/*" → "./*"
 ├─ eslint.config.mjs           # next/core-web-vitals + next/typescript
 ├─ postcss.config.mjs          # @tailwindcss/postcss 단일 플러그인
@@ -615,6 +615,30 @@ UI 검증은 수동 — 작업 후 `npm run dev` → 브라우저에서 골든 �
 **follow-up 후보**:
 - chip 디스플레이 개선: 현재 [[1]] chip 의 텍스트가 "1" 만 표시 → footnotes prop 을 `renderInline → CitationChip` 까지 drilling 해서 fileName/prettyUrl 표시. UX 측면 개선이지 동작은 정상.
 - 다른 fetch 함수의 cache 정책 일제 점검 (fetchOutline/fetchFiles/fetchState/fetchLogs).
+
+### 12-15. Next 16 Turbopack workspace root 오판 → tailwindcss 해석 실패 — 상태: `closed (2026-05-06)` / 의존: 없음 / 우선순위: 높음
+
+- **발견 (2026-05-06)**: 사용자가 `npm run dev` 실행 시 즉시 컴파일 에러. `Error: Can't resolve 'tailwindcss' in 'd:\Bell_Agent'` + `d:\Bell_Agent\node_modules doesn't exist or is not a directory`. PostCSS 가 `app/globals.css` 의 `@import "tailwindcss";` 를 해석하다 실패.
+- **증상**: tailwindcss 는 `D:\Bell_Agent\frontend\node_modules\tailwindcss` 에 정상 설치돼 있음에도, Turbopack 이 `D:\Bell_Agent` (부모 디렉터리) 를 root 로 잡고 거기서부터 모듈 해석 시작 → 부모엔 `node_modules` 없으니 실패.
+- **진단**:
+  - Next.js 16 부터 Turbopack 의 workspace root 자동 감지가 강화됨. `D:\Bell_Agent` 아래에 `frontend/`, `frontend_my_files/`, `개선 작업/` 같은 형제 폴더가 여러 개 있으니 휴리스틱이 "monorepo 같다" 고 오판하고 부모를 root 로 추론한 것으로 추정.
+  - 부모엔 `package.json` 도 lockfile 도 없지만 그 자체가 다중 형제 폴더 구조에서 root 추론을 막아주지는 않음. Next 15.x 에서는 경고만 떴을 수 있는 상황이 Next 16 에서 fatal 에러로 표면화.
+  - 에러 본문의 `'  No description file found in d:\Bell_Agent or above\n'` 가 결정적 증거 — Turbopack 이 부모에서 위로 올라가며 `package.json` 을 찾는 동작이 그대로 노출.
+- **해결** (`next.config.ts` 패치):
+  ```ts
+  import path from "path";
+  const nextConfig: NextConfig = {
+    turbopack: {
+      root: path.join(__dirname),
+    },
+  };
+  ```
+  + `D:\Bell_Agent\frontend\.next` 캐시 삭제 (옛 root 추정값이 남아있을 수 있음).
+- **검증**: `npm run dev` 재실행 시 컴파일 통과 + 정상 페이지 렌더 확인 의무 (사용자측).
+- **박제 후기**:
+  - **앞으로의 가드**: Next 메이저 업그레이드 또는 새 형제 폴더(예: `backend/`, `mobile/`) 추가 시 본 회귀 재발 가능. 그 경우에도 `turbopack.root` 명시가 default 답. 폴더 구조가 진짜 monorepo 로 발전하면 root 를 진짜 monorepo root 로 옮기고 workspaces 셋업을 별도로 검토.
+  - **모듈 해석 에러의 해석법**: `Can't resolve 'X' in '<예상치 못한 경로>'` 패턴은 99% 모듈 자체 부재가 아니라 **어디서부터 찾기 시작했나** 의 문제. resolve 시작점을 먼저 확인 (`details` 의 첫 줄) → 그 시작점이 의도한 프로젝트 root 인지 검증.
+  - **next.config.ts 의 위치**: 기존엔 빈 설정 (§1) 이었는데 이제 turbopack 항목이 들어감. 다른 설정 (예: webpack alias, env, redirects) 추가 시에도 같은 파일에 합치고 §1 의 한 줄 설명을 동기화 의무.
 
 ---
 
