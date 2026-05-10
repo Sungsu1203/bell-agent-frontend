@@ -226,21 +226,26 @@ export async function fetchEvents(
   return http(`/api/events?cursor=${cursor}&limit=${limit}`);
 }
 
-// ───── Export (Word 다운로드) ─────
+// ───── Export (Word / PowerPoint 다운로드) ─────
 
 export interface ExportPayload {
   kind: "section" | "report";
   section_id?: number;
-  format: "docx";
+  // §13-12-3: 'pptx' 추가. pptx 는 kind="report" 만 지원 (백엔드 §13-12-1).
+  format: "docx" | "pptx";
 }
 
 /**
- * Word(.docx) 다운로드.
- * 백엔드에서 docx 바이너리를 받아 브라우저 다운로드 트리거.
+ * 보고서 다운로드 (Word .docx 또는 PowerPoint .pptx).
+ * 백엔드에서 바이너리를 받아 브라우저 다운로드 트리거.
  *
  * 사용:
  *   await downloadExport({ kind: "section", section_id: 1, format: "docx" });
  *   await downloadExport({ kind: "report", format: "docx" });
+ *   await downloadExport({ kind: "report", format: "pptx" });  // §13-12, ~30s 소요
+ *
+ * pptx 호출 시 백엔드가 build_final_report() 자동 실행 → sections 의 최신 상태 반영.
+ * 진행 표시는 LogPanel 헤더에서 자동 (백엔드 emit_event, useEvents 폴링).
  */
 export async function downloadExport(payload: ExportPayload): Promise<void> {
   const url = `${API_BASE}/api/export`;
@@ -265,9 +270,11 @@ export async function downloadExport(payload: ExportPayload): Promise<void> {
   // RFC 5987 호환: filename*=UTF-8''<인코딩된이름> 우선, 없으면 filename="..."
   const cd = res.headers.get("content-disposition") ?? "";
 
+  // 디폴트 파일명 fallback — 백엔드가 헤더 안 보낼 때만 사용. format 별 확장자 분기.
+  const ext = payload.format;
   let filename = payload.kind === "section"
-    ? `section-${payload.section_id ?? ""}.docx`
-    : "report.docx";
+    ? `section-${payload.section_id ?? ""}.${ext}`
+    : `report.${ext}`;
 
   // 1) filename*=UTF-8''... (한글 파일명용, 최신 표준) — 우선 시도
   const utf8Match = cd.match(/filename\*=UTF-8''([^;\n]+)/i);

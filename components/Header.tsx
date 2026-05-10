@@ -31,19 +31,40 @@ const statusConfig = {
   },
 };
 
+// §13-12-4: Word/PPT 두 다운로드 버튼 공통 스타일. busy=true 일 때 cursor·opacity 변화.
+function downloadButtonStyle(busy: boolean): React.CSSProperties {
+  return {
+    fontSize: 12,
+    padding: "5px 14px",
+    background: "var(--bg-surface)",
+    border: "0.5px solid var(--border-default)",
+    borderRadius: "var(--radius-sm)",
+    color: "var(--text-primary)",
+    fontWeight: 500,
+    cursor: busy ? "wait" : "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    opacity: busy ? 0.6 : 1,
+  };
+}
+
 export function Header({ project, status }: HeaderProps) {
   const cfg = statusConfig[status];
-  const [downloading, setDownloading] = useState(false);
+  // §13-12-4: docx / pptx 둘 다 active 한 format 추적. 동시 다운로드 막음 (events 채널 충돌 회피).
+  const [downloadingFormat, setDownloadingFormat] = useState<"docx" | "pptx" | null>(null);
 
-  const handleDownloadAllWord = async () => {
-    setDownloading(true);
+  const handleDownload = async (format: "docx" | "pptx") => {
+    if (downloadingFormat) return;
+    setDownloadingFormat(format);
     try {
-      await downloadExport({ kind: "report", format: "docx" });
+      await downloadExport({ kind: "report", format });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      alert(`전체 보고서 다운로드 실패: ${msg}`);
+      const label = format === "pptx" ? "PowerPoint" : "Word";
+      alert(`${label} 다운로드 실패: ${msg}`);
     } finally {
-      setDownloading(false);
+      setDownloadingFormat(null);
     }
   };
 
@@ -88,32 +109,34 @@ export function Header({ project, status }: HeaderProps) {
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        {/* 전체 보고서 Word 다운로드 (단일 액션) */}
+        {/* 전체 보고서 다운로드 — Word / PowerPoint 짝 (§13-12-4) */}
         <button
-          onClick={handleDownloadAllWord}
-          disabled={downloading}
-          style={{
-            fontSize: 12,
-            padding: "5px 14px",
-            background: "var(--bg-surface)",
-            border: "0.5px solid var(--border-default)",
-            borderRadius: "var(--radius-sm)",
-            color: "var(--text-primary)",
-            fontWeight: 500,
-            cursor: downloading ? "wait" : "pointer",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            opacity: downloading ? 0.6 : 1,
-          }}
+          onClick={() => handleDownload("docx")}
+          disabled={!!downloadingFormat}
+          style={downloadButtonStyle(!!downloadingFormat)}
           title="전체 보고서를 Word(.docx)로 다운로드. 섹션별 PDF는 본문 상단 [PDF] 버튼을 사용하세요."
         >
-          {downloading ? (
-            "생성 중…"
+          {downloadingFormat === "docx" ? (
+            "Word 생성 중…"
           ) : (
             <>
               <span style={{ fontSize: 11 }}>📄</span>
               전체 보고서 (Word)
+            </>
+          )}
+        </button>
+        <button
+          onClick={() => handleDownload("pptx")}
+          disabled={!!downloadingFormat}
+          style={downloadButtonStyle(!!downloadingFormat)}
+          title="전체 보고서를 PowerPoint(.pptx)로 다운로드. 약 30초 소요 — 좌측 LogPanel 헤더에서 진행 상황 확인."
+        >
+          {downloadingFormat === "pptx" ? (
+            "PPT 생성 중…"
+          ) : (
+            <>
+              <span style={{ fontSize: 11 }}>📊</span>
+              전체 보고서 (PPT)
             </>
           )}
         </button>
