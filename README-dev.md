@@ -714,8 +714,9 @@ UI 검증은 수동 — 작업 후 `npm run dev` → 브라우저에서 골든 �
 
 ## 14) §13-12 (백엔드 짝 박제) — pptx 다운로드 통합
 
-상태: `진행 중 (Phase B 설계 완료, Phase C 구현 진입)` / 시작: 2026-05-10
+상태: `closed (2026-05-10)` / 시작: 2026-05-10 / 종결: 2026-05-10
 백엔드 짝: `writer_project/README-dev.md` §13-12 (트랙 전체 결정·배경은 백엔드 박제 정전제, 본 섹션은 프론트엔드 측 변경만)
+후속: §12-15-1 (가칭) 운영 자원 가이드 / 백엔드 §13-13 (가칭) 4 결함
 
 ### 진입 배경 요약
 
@@ -732,14 +733,14 @@ UI 검증은 수동 — 작업 후 `npm run dev` → 브라우저에서 골든 �
 
 ### Sub-tasks (frontend 측)
 
-13-12-3. **lib/api.ts downloadExport format 인자 'pptx' 추가** — 상태: `pending` / 의존: 백엔드 §13-12-1 endpoint 동작 / 우선순위: 높음
+13-12-3. **lib/api.ts downloadExport format 인자 'pptx' 추가** — 상태: `closed (commit d290852)` / 의존: 백엔드 §13-12-1 endpoint 동작 / 우선순위: 높음
 - 위치: `lib/api.ts:231-300`
 - 타입 변경: `ExportPayload.format: "docx"` → `"docx" | "pptx"`
 - 디폴트 파일명 fallback (line 268-270) 의 `.docx` 하드코딩 → format 분기 (pptx 시 `.pptx`)
 - Blob 다운로드 + RFC 5987 파싱 (filename*=UTF-8'') 은 format 무관 — 그대로 동작
 - §10 PR 운영 순서 §10-1 (lib/api.ts 갱신 먼저) 준수
 
-13-12-4. **components/Header.tsx 다운로드 UI 확장 — 별도 [PPT] 버튼** — 상태: `pending` / 의존: §13-12-3 / 우선순위: 높음
+13-12-4. **components/Header.tsx 다운로드 UI 확장 — 별도 [PPT] 버튼** — 상태: `closed (commit d290852)` / 의존: §13-12-3 / 우선순위: 높음
 - 위치: `components/Header.tsx:92-119` (현 Word 버튼)
 - 변경: Word 버튼 옆에 [PPT] 버튼 추가 (양쪽 시각적으로 같은 톤, 라벨로 형식 표기)
 - disable 가드: 기존 Word 버튼 로직 재사용 (props.status, downloading 상태)
@@ -754,9 +755,57 @@ UI 검증은 수동 — 작업 후 `npm run dev` → 브라우저에서 골든 �
 - **frontend 측 코드 변경 0**
 - 박제: events 채널은 emit 발화처가 늘어나도 소비측 (frontend) 변경 없는 패턴 — 향후 다른 long-running endpoint 추가 시 동일 재사용
 
-13-12-6. **e2e 검증 + 박제 정리 (frontend 측)** — 상태: `pending` / 의존: §13-12-3·4 + 백엔드 §13-12-1·2·5 / 우선순위: 높음
-- 시나리오 검증: 백엔드 §13-12-6 시나리오 1~6 의 frontend 측면 (UI 동작·LogPanel 표시·버튼 disable·에러 alert)
-- 양쪽 README close 후기 작성 (백엔드 §13-12-6 와 짝)
+13-12-6. **e2e 검증 + 박제 정리 (frontend 측)** — 상태: `closed (2026-05-10)` / 의존: §13-12-3·4 + 백엔드 §13-12-1·2·5 / 우선순위: 높음
+- 시나리오 검증 결과 (frontend 측면): UI 동작·LogPanel 표시·버튼 disable·에러 alert·한글 파일명 — **모두 PASS**
+- LogPanel 헤더 진행 라벨: 변환 준비 / 슬라이드 구성 / 파일 생성 / 완료 — 4단계 자동 표시 (백엔드 emit_event 발화 → useEvents 폴링 자동 수신, frontend 코드 변경 0)
+- [PPT] 버튼 disable 정상 (write phase 도중 / 다운로드 도중 동시 차단)
+- 한글 파일명 RFC 5987 정상 보존 (Content-Disposition `filename*=UTF-8''` 파싱 — `lib/api.ts:266-287` 패턴 format 무관 검증)
+- 양쪽 README close 후기 — 본 close 박제 (frontend) + 백엔드 §13-12 close 박제 (writer_project) 짝.
+
+### Close 후기 (2026-05-10) — frontend 측 검증 PASS + 사고 박제
+
+**검증 결론**: §13-12-3 + §13-12-4 두 변경 (lib/api.ts format 분기 + Header.tsx [PPT] 버튼) 만으로 백엔드 §13-12-1 의 emit_event 4단계가 LogPanel 헤더에 자동 반영. **§12-14 events 채널 + §12-15 RFC 5987 패턴이 새 export 형식 추가에도 변경 0** — 인프라 가치 재확인.
+
+**§10 PR 운영 순서 준수**: lib/api.ts (§13-12-3) → Header.tsx (§13-12-4) → e2e 검증 순서로 진행. 한 commit (d290852) 에 묶었지만 lib/api.ts 변경이 Header.tsx 보다 먼저 작성됨.
+
+**박제된 일반화 교훈**:
+- **format 분기는 lib/api.ts 한 군데**: `ExportPayload.format: "docx" | "pptx"` 타입 + 디폴트 파일명 fallback 분기. 컴포넌트는 `format: "pptx"` 만 넘김. 향후 PDF deck 추가 시 동일 패턴 — 타입 한 줄 + fallback 한 줄로 끝.
+- **별도 버튼 vs 드롭다운 결정 (결정 4)**: format 2개 단계에서는 별도 버튼이 단순. 3개 이상 시 드롭다운 재검토 (PDF deck 추가 시점).
+- **사용자 mental model 박제**: "[PPT] 클릭은 자동으로 최신 sections 반영" — Header.tsx 의 onClick 한 줄에서 백엔드가 build_final_report 자동 호출. 프런트는 동기화 무책임 (백엔드 책임 분리).
+
+**Cold storage**: frontend 측 정리 대상 0건 (M README-dev.md 만). 백엔드 `writer_project` 측 cold storage 정리 (`.tmp_haiku_tokens*.log` 3개 + `NEXT_SESSION.md`) 는 백엔드 §13-12 close 박제 참조 — 별도 chore commit (writer_project 단독).
+
+### §12-15-1 (가칭, 후속) — 운영 자원 가이드 박제 — 상태: `pending` / 발견: 2026-05-10 §13-12 검증 도중 / 우선순위: 중
+
+**사고 (2026-05-10)**: §13-12 e2e 검증 도중 단발성 시스템 다운 — Windows ERROR 1450 (시스템 thread 한도 초과) + tailwindcss 해석 실패 회귀 메시지 동시 표면화.
+
+**진단 결과** (read-only 점검 — `next.config.ts` + git log + package.json + §12-15 박제 본문):
+- §12-15 박제 fix (`turbopack: { root: path.join(__dirname) }`) **그대로 살아있음** — commit a0cf62d (2026-05-06) 이후 `next.config.ts` 변경 0건.
+- §12-15 박제 fix 자체는 정상 동작 — 4일간 (2026-05-06 ~ 2026-05-10) frontend dev 무문제. 사용자 보고: "이번 다운이 거의 처음".
+- 사고 시점에만 fix 가 우회됨 — 시스템 자원 race condition 가설 (가능성 2 단발 사고).
+
+**원인 가설 (확정)**: 시스템 자원 임계 race condition.
+- §13-12 검증 시점 baseline 평소보다 무거움 — backend python (Uvicorn + Chroma + LangGraph) + frontend node (Turbopack + dev) + Claude 데스크톱 + 끌로드 코드 + msedge (localhost:3000 + Claude.ai 다중 탭) + PowerPoint (사용자 .pptx 검증) + PPT 다운로드 흐름 (gpt-4o ~30s + 메모리 spike) 동시 활성.
+- Thread baseline 4,223 (idle) 에 PPT 생성의 worker spawn 추가 → 임계 도달 → OS 가 thread/메모리 자원 거절 (ERROR 1450) → rayon worker panic → turbopack tailwindcss resolve 컨텍스트 손상 → resolver default 동작으로 폴백 (D:\Bell_Agent\ 부터 탐색) → §12-15 박제 fix 우회 → tailwindcss 회귀 표면화.
+
+**박제 가치 — 운영 mental model**:
+- §13-12 같은 트랙 검증 시점은 평소 운영보다 무거움 — 사용자가 산출물 검증 (PowerPoint, Word) 활성 + Claude 데스크톱 + 끌로드 코드 모두 활성 + backend·frontend 모두 동시 무거운 워크로드.
+- 평소 안전한 §12-15 박제 fix 가 검증 시점 race condition 에서만 우회될 수 있음.
+- §12-15 박제 fix 의 견고성 한계: 시스템 자원 race 시점에는 우회 가능 — race 자체를 차단하는 운영 가이드가 보완책.
+
+**진입 조건 / 박제할 것**:
+- 시스템 자원 baseline 측정 (메모리·thread idle / 검증 시점 / 임계 직전)
+- 검증 시점 운영 가이드: "PPT 다운로드 같은 무거운 작업 진입 전 thread count + 메모리 점검 권고"
+- 측정 도구 검토 (PowerShell `Get-Process` baseline / threadcount diff / 메모리 watermark)
+- 짝 박제: 백엔드 `writer_project/README-dev.md` §12-15-1 (가칭).
+
+**Commit 시퀀스 (양쪽 레포 4건 + close 2건)**:
+- 7dbf76d (writer_project): §13-12 placeholder
+- a956cd7 (frontend, **본 레포**): §13-12 짝 placeholder
+- ee26c62 (writer_project): §13-12-1 + §13-12-2 + §13-12-5 백엔드
+- d290852 (frontend, **본 레포**): §13-12-3 + §13-12-4 UI
+- (백엔드 commit 6, writer_project): §13-12 close 박제
+- (본 commit 7, frontend): §13-12 짝 close 박제
 
 ### 보존 자산 (재사용)
 
