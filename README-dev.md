@@ -711,3 +711,58 @@ UI 검증은 수동 — 작업 후 `npm run dev` → 브라우저에서 골든 �
 **한글 파일명 슬러그 매칭의 부분 일치**: `slugifyTitle()` 은 구두점만 제거 + 공백 → 하이픈. 백엔드 슬러그 함수가 더 강한 정규화(예: 괄호 제거)를 하면 매칭 실패 → 섹션이 done 상태로 안 잡히고 fileId 가 비어 있을 수 있음. 백엔드 §12-13-9 와 직결 — 양쪽 동기화 필요.
 
 ---
+
+## 14) §13-12 (백엔드 짝 박제) — pptx 다운로드 통합
+
+상태: `진행 중 (Phase B 설계 완료, Phase C 구현 진입)` / 시작: 2026-05-10
+백엔드 짝: `writer_project/README-dev.md` §13-12 (트랙 전체 결정·배경은 백엔드 박제 정전제, 본 섹션은 프론트엔드 측 변경만)
+
+### 진입 배경 요약
+
+백엔드 §13 v1 (`agent.export.cli` md → pptx, gpt-4o, ~30s, ~$0.07/run) 자산을 사용자 UI 에 노출. 현 `Header.tsx` 의 [전체 보고서 (Word)] 옆에 [PPT] 버튼 추가가 본 트랙의 1cm.
+
+### Phase A 보강 발견 (2026-05-10) — sections vs reports 비대칭 (백엔드 책임)
+
+운영 ground truth: `sections/` 가 `reports/latest.md` 보다 이틀 최신. cli 흐름은 `reports/latest.md` 우선이라 stale pptx 위험. **해결은 백엔드 책임**: pptx endpoint 가 `build_final_report()` 자동 호출 (옵션 1a 채택). 프론트는 동기화 무책임 — `downloadExport({format: "pptx"})` 호출만으로 항상 최신 sections 반영 보장됨.
+
+### Phase B 결정 (백엔드 박제 참조 — 프론트 영향만 발췌)
+
+- **결정 3 (UX, 옵션 B)**: events 채널 통합 — `useEvents()` 폴링이 LogPanel 헤더에 진행 표시 (변경 거의 없음, 백엔드 emit_event 가 자동 발화)
+- **결정 4 (UI, 별도 버튼)**: Header.tsx 의 Word 옆에 [PPT] 추가. 1-클릭, 단순. (드롭다운 통합은 미래 PDF deck 추가 시 재검토)
+
+### Sub-tasks (frontend 측)
+
+13-12-3. **lib/api.ts downloadExport format 인자 'pptx' 추가** — 상태: `pending` / 의존: 백엔드 §13-12-1 endpoint 동작 / 우선순위: 높음
+- 위치: `lib/api.ts:231-300`
+- 타입 변경: `ExportPayload.format: "docx"` → `"docx" | "pptx"`
+- 디폴트 파일명 fallback (line 268-270) 의 `.docx` 하드코딩 → format 분기 (pptx 시 `.pptx`)
+- Blob 다운로드 + RFC 5987 파싱 (filename*=UTF-8'') 은 format 무관 — 그대로 동작
+- §10 PR 운영 순서 §10-1 (lib/api.ts 갱신 먼저) 준수
+
+13-12-4. **components/Header.tsx 다운로드 UI 확장 — 별도 [PPT] 버튼** — 상태: `pending` / 의존: §13-12-3 / 우선순위: 높음
+- 위치: `components/Header.tsx:92-119` (현 Word 버튼)
+- 변경: Word 버튼 옆에 [PPT] 버튼 추가 (양쪽 시각적으로 같은 톤, 라벨로 형식 표기)
+- disable 가드: 기존 Word 버튼 로직 재사용 (props.status, downloading 상태)
+- 클릭 핸들러: `downloadExport({ kind: "report", format: "pptx" })`
+- 로딩 라벨: "PPT 생성 중…" (~30s 동안 사용자에게 표시)
+- §1 의존 규칙 준수 (`components/*` 의 fetch 직접 호출 금지 — `lib/api.ts:downloadExport` 통과)
+- 사용자 mental model 박제: "[PPT] 클릭은 자동으로 최신 sections 반영" (백엔드 build_final_report 자동 호출)
+
+13-12-5. **events 채널 통합 (no-op as standalone)** — 상태: `흡수 완료` / 의존: 백엔드 §13-12-1 / 우선순위: —
+- 백엔드 §13-12-1 의 `_api_export_pptx()` 가 emit_event 4단계 (start / phase / phase / done) 자동 발화
+- `useEvents()` 폴링이 이미 운영 중 (§12-14) → 새 이벤트 자동 수신 → LogPanel 헤더 자동 갱신
+- **frontend 측 코드 변경 0**
+- 박제: events 채널은 emit 발화처가 늘어나도 소비측 (frontend) 변경 없는 패턴 — 향후 다른 long-running endpoint 추가 시 동일 재사용
+
+13-12-6. **e2e 검증 + 박제 정리 (frontend 측)** — 상태: `pending` / 의존: §13-12-3·4 + 백엔드 §13-12-1·2·5 / 우선순위: 높음
+- 시나리오 검증: 백엔드 §13-12-6 시나리오 1~6 의 frontend 측면 (UI 동작·LogPanel 표시·버튼 disable·에러 alert)
+- 양쪽 README close 후기 작성 (백엔드 §13-12-6 와 짝)
+
+### 보존 자산 (재사용)
+
+- §12-15 Content-Disposition RFC 5987 한글 파일명 패턴 (lib/api.ts:266-287 — format 무관)
+- §12-14 events 채널 (`useEvents` / LogPanel 헤더) — 변경 없이 자동 반영
+- §10 PR 운영 순서 (lib/api.ts 먼저 → 컴포넌트 다음)
+- §1 의존 규칙 (components 의 fetch 직접 호출 금지)
+
+---
