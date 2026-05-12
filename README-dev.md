@@ -815,3 +815,74 @@ UI 검증은 수동 — 작업 후 `npm run dev` → 브라우저에서 골든 �
 - §1 의존 규칙 (components 의 fetch 직접 호출 금지)
 
 ---
+
+## 15) §13-14 (백엔드 짝 박제) — md → pptx 변환 안정화 + dual track 운영
+
+상태: `closed (2026-05-12)` / 시작: 2026-05-11 / 종결: 2026-05-12
+백엔드 짝: `writer_project/README-dev.md` §13-14 트랙 (md → pptx 정보 충실도, 정규화 fix, multi-provider 평가) — 박제 인덱스 상단 + line 2738~3296 본문
+후속 박제: `writer_project/README-dev-2.md` (백엔드 분리 운영 진입 commit `08edfd7` 이후 신규 박제 영역)
+
+### 진입 배경 요약
+
+백엔드 §13-14 트랙 (md → pptx 변환 결함 양상 분석 + 정규화 fix + multi-provider 평가) 의 frontend 측 짝 박제. frontend "전체 리포트 다운로드 (pptx)" 결과에 직접 영향 — 본 cross-reference 는 frontend 개발자가 백엔드 변경 사항 + dual track 운영 인지를 위함. frontend 측 코드 변경 0.
+
+### 백엔드 짝 박제 참조 (요약)
+
+- **§13-14-α** — A2+B fix (`report_builder.py` `_ensure_section_h2_normalized` helper + 옵션 B strip 제거) → cascade 100% (15/15) + 구조 변동 0/30 (gpt-4o 3 라운드)
+- **§13-14-α-sonnet** — Sonnet 4.6 3 라운드 측정 (4 분기 cascade 안정 + 누락 mean 8.1%) + dual track 운영 채택
+- **§13-14-γ** — linter 정식화 (`scripts/lint_report_consistency.py`, LLM 0, 표준 라이브러리만) + sanity check 양 트랙 1:1 정합 (catch 21·26 박제)
+- **§13-14-2 트랙 close** — 4 sub-track 처리 확정 (α close / β 흡수 / γ close / δ 진입 보류)
+
+상세 박제: 백엔드 저장소 `writer_project/README-dev.md` (commit `612cc87` 까지) + `writer_project/README-dev-2.md` (분리 운영 `08edfd7` 이후).
+
+### frontend 영향 — 사용자 use case 차원
+
+(1) "전체 리포트 다운로드 (pptx)" 결과의 풍부함이 백엔드 provider 설정에 따라 변동:
+
+| 항목 | gpt-4o (운영 default) | Sonnet 4.6 (dual track 옵션) |
+|---|---|---|
+| n_slides | 38 | 52~55 (3 라운드 측정) |
+| pptx 크기 | ~99~105 KB | ~163~173 KB |
+| 본문 풍부함 | 표준 4-블록 구조 | 자율 구조 (Phase 분기 표 + KPI 표) |
+| 생성 시간 (e2e) | ~4.6 분 | ~12 분 |
+
+(2) frontend UI 측 변경 사항 0 — 백엔드 provider 토글로 결정. frontend 는 백엔드 응답 그대로 표시 (§13-12 인프라 재사용).
+
+(3) 사용자 use case 별 백엔드 provider 선택 가능:
+- **빠른 단건 처리** → 백엔드 gpt-4o (`LLM_PROVIDER=openai`)
+- **풍부한 batch 처리** → 백엔드 Sonnet 4.6 (`LLM_PROVIDER=anthropic` + `ANTHROPIC_MODEL=claude-sonnet-4-6`)
+- 백엔드 `.env` 의 `LLM_PROVIDER` 토글로 전환 (frontend 재시작 불요)
+
+### Sub-tasks (frontend 측)
+
+- **(없음)** frontend 측 코드 변경 0 — 백엔드 측 fix 만으로 결함 해소 + dual track 운영
+- **(인지)** "전체 리포트 다운로드" 결과의 본문 풍부함 차이 = 백엔드 provider 설정 의존 — 사용자 mental model 박제
+- **(인프라 재사용 입증)** §13-12 의 [PPT] 버튼 + lib/api.ts format 분기 + events 채널 → 백엔드 provider 변화에도 frontend 변경 0 (§12-14 events + §12-15 RFC 5987 패턴의 견고성 재확인)
+
+### Close 후기 (2026-05-12) — frontend 측 검증 PASS
+
+**검증 결론**: 백엔드 §13-14 fix 적용 후 frontend "전체 리포트 다운로드" 정상 작동 — Sonnet 4.6 측정 3 라운드 cascade 4 분기 안정 입증. **§13-12 트랙에서 구축한 인프라 (lib/api.ts format 분기 + Header.tsx [PPT] 버튼 + events 채널) 가 백엔드 provider 변화 + content 풍부함 변화 모두 흡수**.
+
+**박제된 일반화 교훈**:
+- **인프라 분리 가치 재확인**: §13-12 의 frontend ↔ backend 분리 (frontend = transport, backend = content) 패턴이 §13-14 측 백엔드 변경 (provider 토글 + 정규화 fix) 에 완전 흡수. frontend 변경 0 으로 사용자 use case 확장 (dual track) 달성.
+- **provider 변동 = 사용자 use case 분기**: frontend 가 provider 식별 노출 불요 — 사용자가 use case 별 백엔드 `.env` 토글로 결정. UI 단순성 유지.
+- **백엔드 dual track 운영**: gpt-4o (default) + Sonnet 4.6 (옵션) 양립. frontend 는 둘 다 동일 endpoint (`/export/pptx`) 호출 — 인프라 비대칭 0.
+
+### 보존 자산 (재사용)
+
+- §13-12 [PPT] 버튼 (Header.tsx) — 백엔드 provider 변화에도 그대로 동작
+- §13-12 `lib/api.ts:downloadExport({format: "pptx"})` — provider 토글 무관
+- §12-14 events 채널 (`useEvents` / LogPanel 헤더) — 백엔드 emit_event 발화 그대로 자동 반영
+- §12-15 Content-Disposition RFC 5987 한글 파일명 — provider 무관
+
+### 짝 박제 인덱스 (frontend 트랙 ↔ backend 트랙)
+
+| frontend 트랙 | backend 짝 | 상태 |
+|---|---|---|
+| §12-14 (Part A) | backend §12-16 (인용 매핑 마커 통일) | closed |
+| §14 (§13-12 짝) | backend §13-12 (pptx 다운로드 통합) | closed |
+| **§15 (§13-14 짝, 본 섹션)** | **backend §13-14 (md → pptx 정규화 + dual track)** | **closed** |
+
+향후 백엔드 신규 트랙 진입 시 frontend 측 짝 박제 패턴 정합 — 본 §15 양식 재사용.
+
+---
