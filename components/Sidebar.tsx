@@ -2,6 +2,7 @@
 "use client";
 
 import { Project, Section } from "@/lib/data";
+import { SettingsCard } from "./SettingsCard";
 
 interface SidebarProps {
   project: Project;
@@ -10,6 +11,10 @@ interface SidebarProps {
   onSelectSection: (id: number) => void;
   onWriteSection: (id: number) => void;
   onUpdateRag: () => void;
+  currentProvider?: {
+    provider: string;
+    model: string;
+  };
 }
 
 const cardStyle: React.CSSProperties = {
@@ -35,6 +40,7 @@ export function Sidebar({
   onSelectSection,
   onWriteSection,
   onUpdateRag,
+  currentProvider,
 }: SidebarProps) {
   return (
     <aside
@@ -152,6 +158,9 @@ export function Sidebar({
           </ol>
         )}
       </div>
+
+      {/* 설정 카드 — 미션 카드 아래 */}
+      <SettingsCard currentProvider={currentProvider} />
     </aside>
   );
 }

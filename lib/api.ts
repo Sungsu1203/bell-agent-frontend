@@ -35,6 +35,10 @@ export interface StateResponse {
   cancel_requested: boolean;
   iteration_count: number;
   updated_at: string;
+  current_provider?: {
+    provider: string;
+    model: string;
+  };
 }
 
 export interface OutlineResponse {
