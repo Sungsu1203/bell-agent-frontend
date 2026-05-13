@@ -422,6 +422,7 @@ export default function Page() {
               }}
               onWriteSection={handleWriteSection}
               onUpdateRag={handleUpdateRag}
+              currentProvider={state?.current_provider}
             />
           </div>
           {isReviewStep ? (
