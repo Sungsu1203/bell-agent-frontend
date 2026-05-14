@@ -117,6 +117,27 @@ export function parseMarkdownBlocks(text: string): Block[] {
     // ─── 빈 줄 ───
     if (!line.trim()) {
       flushBuffer();
+      // CommonMark loose list: 같은 타입 리스트가 이어지면 flushList 보류.
+      // LLM 출력이 ol/ul 항목 사이에 빈 줄을 끼우면 파서가 리스트를 끊어
+      // CSS decimal 카운터가 매 항목마다 1로 리셋되는 버그 방지.
+      if (listType) {
+        let nextNonEmpty: string | null = null;
+        for (let j = i + 1; j < lines.length; j++) {
+          if (lines[j].trim()) {
+            nextNonEmpty = lines[j];
+            break;
+          }
+        }
+        if (nextNonEmpty !== null) {
+          const continuesOrdered =
+            listType === "ordered" && /^\s*\d+[.)]\s+/.test(nextNonEmpty);
+          const continuesUnordered =
+            listType === "unordered" && /^\s*[-*]\s+/.test(nextNonEmpty);
+          if (continuesOrdered || continuesUnordered) {
+            continue;
+          }
+        }
+      }
       flushList();
       continue;
     }

@@ -692,6 +692,17 @@ UI 검증은 수동 — 작업 후 `npm run dev` → 브라우저에서 골든 �
   - 짧은 chunk (예: <100자) 는 요약이 chunk 본문과 거의 동일 → 요약 생략하고 raw 만 보여주는 게 자연스러울 수 있음. 백엔드 또는 프런트에서 길이 기반 분기 검토.
   - 요약 품질이 사용자 기대와 어긋나면 백엔드 프롬프트 튜닝 필요 (§12-22 follow-up). 본 frontend 변경은 그대로 유지.
 
+### 12-18. ordered list 1,1,1 렌더링 — 빈 줄로 끊긴 리스트 — 상태: `closed (2026-05-14)` / 의존: 없음 / 우선순위: 높음
+
+- **출처**: 사용자 보고 (2026-05-14, venfobel-vitamin §4 류 섹션) — numbered list 가 `1, 2, 3, 4, 5` 대신 `1, 1, 1, 1, 1` 로 렌더. 박제 md 확인 시 LLM (gpt-4o) 이 긴 항목을 박제할 때 항목 사이에 빈 줄을 끼우는 패턴 — CommonMark 의 loose list 표준 형식.
+- **원인 (확정)**: `lib/markdown.ts:117-122` 의 빈 줄 처리가 무조건 `flushList()` 호출 → 진행 중 ordered-list 종료 → 다음 ol 라인 박제가 새 리스트로 시작 → CSS `list-style: decimal` 이 매 리스트마다 1 부터 다시 카운트.
+- **패치**: `lib/markdown.ts:117-141` 빈 줄 처리에 lookahead 도입. `listType` 활성 + 다음 비빈 줄이 같은 타입(ordered → `\d+[.)]`, unordered → `[-*]`) 의 리스트 라인이면 `flushList()` 보류하고 빈 줄만 skip. 그 외에는 기존대로. CommonMark loose list 표준 준수.
+- **검증**: `npx tsc --noEmit` PASS. 사용자 측 검증 — (1) `npm run dev` 재시작 (2) 문제 섹션 열어 `1, 2, 3, 4, 5` 정상 표시 (3) 기존 정상 케이스 회귀 0 (4) Word/PPT 다운로드 회귀 0.
+- **부가 효과**: unordered list 도 동일 패턴 자동 정정. nested list 박제값에는 영향 없음 (들여쓰기 기반 로직, 빈 줄 무관).
+- **앞으로의 가드 / 일반화 교훈**:
+  - **LLM 출력 ↔ CommonMark 표준 정합**: LLM 이 보내는 loose list 패턴은 표준 마크다운이므로 파서가 그것을 흡수해야 함 (반대로 LLM 프롬프트로 빈 줄 금지하는 우회는 fragile — 항목 길어지면 LLM 이 자연스럽게 빈 줄 끼움).
+  - **flush 의 lookahead 패턴**: state 머신성 파서에서 "구분자가 진짜 종결인지 vs 일시 휴식인지" 는 다음 토큰을 봐야 결정 가능. 동일 패턴이 §-list 이외에 paragraph 합치기 등에도 응용 가능.
+
 ---
 
 ## 13) 알려진 이슈/주의사항
